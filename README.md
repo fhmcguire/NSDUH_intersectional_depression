@@ -1,5 +1,5 @@
-# NSDUH_intersectional_depression
-This repository contains data and code used to support the manuscript "Depression at the intersection of race/ethnicity, sex/gender, and sexual orientation in a nationally representative sample of US adults: A design-weighted intersectional MAIHDA."
+# Depression at the intersection of race/ethnicity, sex/gender, and sexual orientation in a nationally representative sample of US adults: A design-weighted MAIHDA
+This repository contains data and code used to support the manuscript "Depression at the intersection of race/ethnicity, sex/gender, and sexual orientation in a nationally representative sample of US adults: A design-weighted MAIHDA."
 
 **This manuscript is currently undergoing peer review.** A **preprint version** (Date: 04/13/2023) is available at:
 

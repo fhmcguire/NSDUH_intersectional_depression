@@ -10,6 +10,6 @@ This study examined how race/ethnicity, sex/gender, and sexual orientation inter
 ## Overview of repository structure/contents
 
 1. Original data downloaded from NSDUH are available in Stata format in the "/01_original_data" folder. Files were too large to be uploaded directly, so they are stored in zip folders. This data is processed/cleaned using the "01_nsduh_dataManagement.R" file to create the final data file ("nsduh.RDS") used for analysis.
-2. MAIHDA model fits are stored in the "/02_fits" folder. Similar to original data, these are stored in individual zip folders due to their large size.
+2. MAIHDA model fits should be stored in the "/02_fits" folder. However, these files are too large to be stored on GitHub, so please inquire directly to request access to the model fits.
 3. Tables and figures that are used in the manuscript are stored in the "/03_tables_figures" folder.
 4. All R code for this project is stored in the main folder and is separated into three files: (1) "01_nsduh_dataManagement.R" for data management/cleaning tasks, (2) "02_nsduh_analysis.R" for conducting design-weighted MAIHDA using Markov chain Monte Carlo (MCMC), and (3) "03_nsduh_estimates.R" for generating/summarizing estimates (e.g., model-predicted prevalence, excess/reduced prevalence) for each outcome measure.

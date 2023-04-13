@@ -1,0 +1,2409 @@
+---
+title: "Model estimates & summaries"
+subtitle: "Depression among US adults at the intersection of race/ethnicity, sex/gender, and sexual orientation: A design-weighted intersectional MAIHDA"
+author: "F. Hunter McGuire, MPH"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc-location: left
+    code_folding: show
+  pdf_document:
+    toc: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+# Abstract
+
+This study examined how race/ethnicity, sex/gender, and sexual orientation intersect to socially pattern depression among US adults. We used cross-sectional data from the 2015-2020 National Survey on Drug Use and Health (NSDUH; n=234,772) to conduct design-weighted intersectional multilevel analysis of individual heterogeneity and discriminatory accuracy (MAIHDA) for two binary outcomes: past-year and lifetime major depressive episode (MDE). With 42 intersectional groups constructed from seven race/ethnicity, two sex/gender, and three sexual orientation categories, we estimated group-specific prevalence and excess/reduced prevalence attributable to intersectional effects (i.e., two-way or higher interactions of identity variables). Models revealed considerable heterogeneity between intersectional groups, with prevalence estimates ranging from 3.4–31.4% (past-year) and 6.7–47.4% (lifetime). Estimates were generally higher among groups inclusive of people who were Multiracial, White, women, gay/lesbian, or bisexual. Additive effects explained most between-group variance; however, approximately 3% (past-year) and 12% (lifetime) were attributable to intersectional effects, with some groups experiencing excess/reduced prevalence. Sexual orientation (42.9–54.0%) explained a greater proportion of between-group outcome variance relative to race/ethnicity (10.0–17.1%) and sex/gender (7.5–7.9%). Notably, we extend prior intersectional MAIHDA applications by utilizing complex sample survey weights, thus opening opportunities to apply this method to quantify intersectionality with weighted survey data.
+
+# Setup
+
+The first code chunk loads the necessary `R` packages, Stan model fits, and NSDUH 2015-2020 (combined) data frame.
+
+I then extract the parameter estimates from each model, including the effective sample size (ESS) and Gelman-Rubin statistic (r-hat) that will later be used to evaluate Markov chain Monte Carlo (MCMC) model convergence.
+
+Finally, I load the NSDUH 2015-2020 dataset.
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# set global options for how chunks are processed/output
+knitr::opts_chunk$set(message=FALSE, warning=FALSE)
+
+# Load packages
+library(tidyverse) # Load `tidyverse` suite of packages
+library(plyr) # Tools for Splitting, Applying and Combining Data
+library(csSampling) # Complex survey sampling with Bayesian methods
+library(bayesplot) # Plotting for Bayesian models
+library(ggthemes) # Extra themes and functions for `ggplot2`
+library(extrafont) # Extra fonts for creating charts/figures
+library(rstudioapi) # Retrieve information about an RStudio Editor
+library(openxlsx) # xlsx reading, writing, and editing
+library(gtsummary) # Data Summary and Analytic Result Tables
+
+# set working directory to source file location
+### get full file path
+RMDpath = rstudioapi::getSourceEditorContext()$path
+### remove file name from file path
+RMDpath = gsub('/03_nsduh_estimates.Rmd','', RMDpath)
+### set the working directory
+setwd(RMDpath)
+
+# Load NSDUH data frame (2015-2020 combined data collection years)
+nsduh = readRDS("nsduh.RDS")
+```
+
+# Define functions
+
+This code defines 8 functions used to extract/transform estimates.
+
+To examine model convergence diagnostics for each parameter, the `autocor_plots` produces autocorrelation plots and the `trace_plots` function produces trace plots. 
+
+Since logistic regression was used, we used the `logit2prob` function to convert model estimates from the logit to the probability scale. 
+
+The `renameArray` function renames parameter values for the intersectional groups to make the convergence diagnostic plots easier to read/interpret.
+
+For each outcome, the `prevalence` extracts intersectional group-specific random intercepts (residuals) to summarize prevalence with mean and 95% CI.
+
+For each model, the `variance` function calculates standard deviation (SD), variance, variance partition coefficient (VPC), and proportional change in variance (PCV). As inputs, it takes a list of stanfit (rstan) objects.
+
+For each intersectional group, the `calculate_effects` function was used to estimate additive effects (i.e., the sum of identity variable coefficients relevant to each group) and intersectional effects (i.e., excess/reduced prevalence in each group due to interaction of its constituent identity variables). This function produced a data list containing full effects (i.e., the additive + international effects), additive effects, international effects. 
+Finally, we used the `summarize_effects` function to calculate means and 95% credible intervals for the full, additive, and intersectional effects for each intersectional group.
+
+```{r}
+# Autocorrelation plots
+autocor_plots <- function(array, parsList) {
+  lapply(parsList, function(x) {
+    bayesplot::mcmc_acf(array, pars = x) +
+      ggtitle(paste("Autocorrelation plots for", x)) +
+      theme_clean() +
+      theme(axis.title = element_text(face = "bold"),
+            text = element_text(family = "Arial"))
+  })
+}
+
+# Trace plots
+trace_plots <- function(array, parsList) {
+  lapply(parsList, function(x) {
+    bayesplot::mcmc_trace(array, pars = x) +
+      ggtitle(paste("Trace plots for", x)) +
+      theme_clean() +
+      theme(axis.title = element_text(face = "bold"),
+            text = element_text(family = "Arial"))
+  })
+}
+
+# Define logit2prob function
+# This is used for converting logits to a 0-1 probability scale
+logit2prob = function(logit) {
+  odds = exp(logit)
+  prob = odds / (1 + odds)
+  return(prob)
+}
+
+# Rename parameter values to match intersectional group names
+# This is used to make the convergence diagnostics easier to read
+renameArray = 
+  function(fit, # stanfit object
+           names, # vector of intersectional group names
+           start, # start location (i.e., intercept for group 1)
+           finish # finish location (i.e., intercept for group 42)
+           ) {
+  
+  # save model fit into an array object
+  array = as.array(fit)
+  
+  # change names of array parameters
+  for (i in start:finish) {
+    dimnames(array)[[3]][i] = names[i - start + 1]
+  }
+  
+  # return the array with renamed parameters
+  return(array)
+}
+
+# Define prevalence function to summarize prevalence estimates
+# for each intersectional group
+prevalence = function(fit, # stanfit object
+                      n_iter, # number of MCMC iterations
+                      group_names, # vector of intersectional group names
+                      short_names # vector of shortened group names
+                      ) {
+  
+  # Grab the parameter names for the random intercepts (residuals)
+  # format example = r_1_1[1]
+  parsList = grep("^r_1_1\\[\\d+\\]$", 
+                  names(fit), 
+                  value = TRUE)
+  
+  # create a matrix to store prevalence values
+  prev = matrix(NA, 
+                nrow = length(group_names), 
+                ncol = 5)
+  prev[,1] = c(1:length(group_names))
+  colnames(prev) = c("GroupID","Mean","LowerCI","UpperCI","Combined")
+  rownames(prev) = group_names
+  
+  # create matrix to store full posterior distributions
+  # 42 intersectional groups + 16000 iterations
+  posterior = matrix(NA, 
+                     nrow = length(group_names), 
+                     ncol = n_iter)
+  
+  # extract model intercept posterior distribution
+  intercept = extract(fit, pars = "Intercept")
+  
+  # Extract intersectional group residuals and add them to the model intercept
+  residuals = extract(fit, pars = parsList)
+  for (i in 1:length(residuals)) {
+    posterior[i,] = unlist(residuals[i]) + unlist(intercept)
+  }
+  
+  # Summarize prevalence estimates
+  for (j in 1:nrow(posterior)) {
+    prev[j,2] = mean(posterior[j,])
+    prev[j,3:4] = quantile(posterior[j,],
+                           prob = c(0.025, 0.975))
+  }
+  
+  # Convert from logit to probability scale
+  # multiply by 100 to scale from 0-100%
+  prev[,2:4] = format(round(logit2prob(prev[,2:4])*100, digits=1), nsmall=1)
+  # remove extra white spaces
+  prev = gsub("\\s+", "", prev)
+  
+  # calculate the combined value
+  prev[,5] = paste(prev[,2],
+                   " (",
+                   prev[,3],
+                   ", ",
+                   prev[,4],
+                   ")",
+                   sep = "")
+  
+  # post-processing
+  prev = as.data.frame(prev) %>% 
+    mutate(
+      # convert mean, lowerCI, and upperCI back to numeric
+      across(c(2:4), as.numeric),
+      # generate identity indicators
+      race = factor(
+        rep(c(1:7),
+            times=c(6,6,6,6,6,6,6)),
+        labels = c("White", "Black", "Hispanic/Latine",
+                   "Asian", "NAAN", "NHPI", "Multiracial")),
+      gender = factor(
+        rep(c(1,1,1,2,2,2),
+            times=7), 
+        labels = c("Men", "Women")),
+      sexualOrientation = factor(
+        rep(c(1,2,3),
+            times=14),
+        labels = c("Heterosexual", "Gay", "Bisexual"))) %>% 
+    cbind(., short_names)
+  
+  # output the prevalence estimates + 95% CI
+  return(prev)
+}
+
+
+
+# Define function to calculate SD, variance, VPC, and PCV
+# VPC = variance partition coefficient
+# PCV = proportional change in variance (relative to Model 1)
+# "fits" is a list of stanfit objects
+variance = function(fits) {
+  
+  # create a matrix to store mean + 95% CI estimates
+  vpc = matrix(nrow = length(fits), ncol = 3)
+  # define row/column names for clarity
+  colnames(vpc) = c("Mean VPC", "Lower CI", "Upper CI")
+  rownames(vpc) = c("M1", "M2a", "M2b", "M2c", "M3")
+  
+  # create matrix to store SD and variance values
+  var_sd = matrix(nrow = length(fits), ncol = 2)
+  # define row/column names for clarity
+  colnames(var_sd) = c("Variance", "SD")
+  rownames(var_sd) = c("M1", "M2a", "M2b", "M2c", "M3")
+  
+  # loop through each model fit to extract/summarize var, SD, & VPC values
+  for (i in 1:length(fits)) {
+    # using one stanfit object at a time
+    fit = fits[[i]]
+    # extract posterior distribution of model standard deviation (SD)
+    sd = extract(fit, pars = "sd_1")
+    sd = sd$sd_1
+    # convert from SD to variance (sigma2)
+    sigma2 = sd^2
+    
+    # store variance and SD means
+    var_sd[i,1] = mean(sigma2)
+    var_sd[i,2] = mean(sd)
+    
+    # calculate full posterior distribution of VPC values
+    fullPosterior = sigma2/(sigma2+((pi^2)/3))*100
+    # summarize VPC as mean and 95% CI (rounded to 2 decimal places)
+    vpc[i,1] = round(mean(fullPosterior),2)
+    vpc[i,2:3] = round(quantile(fullPosterior, 
+                                prob = c(0.025, 0.975)),2)
+  }
+  
+  # calculate proportional change in variance (PCV) relative to Model 1
+  pcv = matrix(nrow = nrow(vpc), ncol = 1)
+  # define row/column names for clarity
+  colnames(pcv) = c("PCV")
+  rownames(pcv) = c("M1", "M2a", "M2b", "M2c", "M3")
+  # loop through VPC values
+  for (j in 2:nrow(vpc)) {
+    pcv[j,1] = round(((vpc[1,1] - vpc[j,1]) / vpc[1,1])*100,2)
+  }
+  
+  # save output into a list
+  output = list(var_sd, vpc, pcv)
+  names(output) = c("var_sd", "vpc", "pcv")
+  return(output)
+}
+
+
+
+# Define function to calculate additive & intersectional effects
+# for each intersectional group using the Model 3 beta coefficients
+# and the Model 3 random (group) intercepts
+calculate_effects = function(beta, # posterior samples of beta coefs
+                             residual # posterior samples of intercepts
+                             ) {
+  
+  # First, create a matrix to store additive effect estimates
+  additiveEffect = matrix(0, nrow=42, ncol=30000)
+  for (i in 1:42) {
+    # Additive effect for White heterosexual men
+    # Beta for age3549 is included to adjust for age category
+    # Ages 35-49 is the approximate middle of the age distribution
+    additiveEffect[i,] = beta$intercept + beta$age3549
+    # Black additive effect
+    if (i %in% 7:12) {
+      additiveEffect[i,] = additiveEffect[i,] + beta$black
+    }
+    # Hispanic/Latine additive effect
+    if (i %in% 13:18) {
+      additiveEffect[i,] = additiveEffect[i,] + beta$latine
+    }
+    # Asian additive effect
+    if (i %in% 19:24) {
+      additiveEffect[i,] = additiveEffect[i,] + beta$asian
+    }
+    # Native American & Alaska Native additive effect 
+    if (i %in% 25:30) {
+      additiveEffect[i,] = additiveEffect[i,] + beta$naan
+    }
+    # Native Hawaiian & Pacific Islander additive effect
+    if (i %in% 31:36) {
+      additiveEffect[i,] = additiveEffect[i,] + beta$nhpi
+    }
+    # Multiracial additive effect
+    if (i %in% 37:42) {
+      additiveEffect[i,] = additiveEffect[i,] + beta$multiracial
+    }
+    # Woman additive effect
+    if (i %in% c(4:6,10:12,16:18,22:24,28:30,34:36,40:42)) {
+      additiveEffect[i,] = additiveEffect[i,] + beta$woman
+    }
+    # Gay/lesbian additive effect
+    if (i %in% c(2,5,8,11,14,17,20,23,26,29,32,35,38,41)) {
+      additiveEffect[i,] = additiveEffect[i,] + beta$gay
+    }
+    # Bisexual additive effect
+    if (i %in% c(3,6,9,12,15,18,21,24,27,30,33,36,39,42)) {
+      additiveEffect[i,] = additiveEffect[i,] + beta$bisexual
+    }
+  }
+  
+  # Define matrix to store "full" effect (i.e., additive + random intercepts)
+  fullEffect = matrix(0, nrow=42, ncol=30000)
+  fullEffect = additiveEffect # start with additive effect values
+  for (j in 1:42) {
+    fullEffect[j,] = fullEffect[j,] + residual[j,]
+  }
+  
+  # Convert from logit to probability scale
+  additiveEffect = 100*logit2prob(additiveEffect)
+  fullEffect = 100*logit2prob(fullEffect)
+  
+  # Define matrix to store intersectional effects (i.e., excess/reduced prev.)
+  intersectionalEffect = matrix(0, nrow=42, ncol=30000)
+  intersectionalEffect = fullEffect - additiveEffect
+  
+  # Save the output as a list
+  list = list(fullEffect, additiveEffect, intersectionalEffect)
+  names(list) = c("fullEffect", "additiveEffect", "intersectionalEffect")
+  return(list)
+}
+
+
+
+# Define function to summarize full, additive, and intersectional effects
+summarize_effects = function(df) {
+  # create a matrix to store values
+  output = matrix(0, nrow = 42, ncol = 3)
+  # loop through each intersection group (rows 1-42)
+  for (i in 1:42) {
+    # mean of the posterior distribution
+    output[i,1] = mean(df[i,])
+    # 95% CI around the mean
+    output[i,2:3] = quantile(df[i,], probs = c(0.025, 0.975))
+  }
+  # return the interaction summary dataset
+  return(output)
+}
+
+```
+
+# Define intersectional groups
+
+Here I define intersectional groups defined by race/ethnicity, sex/gender, and sexual orientation. This produces 42 mutually-exclusive groups based on 7 races/ethnicity, 2 sex/gender, and 3 sexual orientation categories.
+
+```{r}
+# Define vector of intersectional group/strata names
+strataName = c("White heterosexual men",
+                 "White gay men",
+                 "White bisexual men",
+                 "White heterosexual women",
+                 "White gay/lesbian women",
+                 "White bisexual women",
+                 "Black heterosexual men",
+                 "Black gay men",
+                 "Black bisexual men",
+                 "Black heterosexual women",
+                 "Black gay/lesbian women",
+                 "Black bisexual women",
+                 "Hispanic/Latine heterosexual men",
+                 "Hispanic/Latine gay men",
+                 "Hispanic/Latine bisexual men",
+                 "Hispanic/Latine heterosexual women",
+                 "Hispanic/Latine gay/lesbian women",
+                 "Hispanic/Latine bisexual women",
+                 "Asian heterosexual men",
+                 "Asian gay men",
+                 "Asian bisexual men",
+                 "Asian heterosexual women",
+                 "Asian gay/lesbian women",
+                 "Asian bisexual women",
+                 "NAAN heterosexual men", # Native American / Alaska Native
+                 "NAAN gay men",
+                 "NAAN bisexual men",
+                 "NAAN heterosexual women",
+                 "NAAN gay/lesbian women",
+                 "NAAN bisexual women",
+                 "NHPI heterosexual men", 
+                 "NHPI gay men", # Native Hawaiian / Pacific Islander
+                 "NHPI bisexual men",
+                 "NHPI heterosexual women",
+                 "NHPI gay/lesbian women",
+                 "NHPI bisexual women",
+                 "Multiracial heterosexual men",
+                 "Multiracial gay men",
+                 "Multiracial bisexual men",
+                 "Multiracial heterosexual women",
+                 "Multiracial gay/lesbian women",
+                 "Multiracial bisexual women")
+
+# create a shorter version of the names
+# used for intersectional group names in Figures 1 and 2
+library(tm)
+stopwords = c(" women", " men")
+strataNameShort = tm::removeWords(strataName, 
+                                   stopwords)
+
+# Get strata counts (N) and merge with strataName
+# Past-year MDE
+strata_count_pyMDE = nsduh %>% 
+  filter(sp_2 == 1) %>% # subpopulation indicator
+  count('strata') %>% 
+  mutate(strataID = strata) %>% 
+  cbind(strataName, strataNameShort) %>% 
+  select(strataID, strataName, strataNameShort, freq)
+# Lifetime MDE
+strata_count_ltMDE = nsduh %>% 
+  filter(sp_1 == 1) %>% # subpopulation indicator
+  count('strata') %>% 
+  mutate(strataID = strata) %>% 
+  cbind(strataName, strataNameShort) %>% 
+  select(strataID, strataName, strataNameShort, freq)
+
+# Create combined counts table
+strata_count_overall = strata_count_pyMDE %>% 
+  mutate(freq_pyMDE = freq) %>% 
+  mutate(freq_ltMDE = strata_count_ltMDE$freq) %>% 
+  select(strataID, strataName, freq_ltMDE, freq_pyMDE)
+
+```
+
+# AIM 1: Past-year MDE
+
+This code section works with models estimating past-year major depressive episodes (MDE).
+
+## Load model fits: Past-year MDE
+
+```{r}
+## Load model fits (produced via "nsduh_pyMDE_analysis.R")
+##### Note: Ensure model fits are saved in a '02_fits/' folder within your
+#####       current working directory.
+pyMDE_m1 = readRDS("02_fits/pyMDE_m1.RDS")
+pyMDE_m2a = readRDS("02_fits/pyMDE_m2a.RDS")
+pyMDE_m2b = readRDS("02_fits/pyMDE_m2b.RDS")
+pyMDE_m2c = readRDS("02_fits/pyMDE_m2c.RDS")
+pyMDE_m3 = readRDS("02_fits/pyMDE_m3.RDS")
+
+## Extract stan_fit objects
+pyMDE_m1 = pyMDE_m1$stan_fit
+pyMDE_m2a = pyMDE_m2a$stan_fit
+pyMDE_m2b = pyMDE_m2b$stan_fit
+pyMDE_m2c = pyMDE_m2c$stan_fit
+pyMDE_m3 = pyMDE_m3$stan_fit
+
+## Extract parameter estimates, effective sample size (ESS), and r-hat 
+## from each model fit. Specify 95% credible intervals.
+pyMDE_m1_sum = as.data.frame(summary(pyMDE_m1,
+                                probs = c(0.025, 0.975))$summary)
+pyMDE_m2a_sum = as.data.frame(summary(pyMDE_m2a,
+                                probs = c(0.025, 0.975))$summary)
+pyMDE_m2b_sum = as.data.frame(summary(pyMDE_m2b,
+                                probs = c(0.025, 0.975))$summary)
+pyMDE_m2c_sum = as.data.frame(summary(pyMDE_m2c,
+                                probs = c(0.025, 0.975))$summary)
+pyMDE_m3_sum = as.data.frame(summary(pyMDE_m3,
+                                probs = c(0.025, 0.975))$summary)
+```
+
+## Variance estimates for all models
+
+```{r}
+# Summarize SD, variance, VPC, and PCV
+pyMDE_var = variance(fits = c(pyMDE_m1, pyMDE_m2a, pyMDE_m2b,
+                              pyMDE_m2c, pyMDE_m3))
+```
+
+## Model 1: Age-adjusted intersectional model
+
+### Convergence diagnostics
+
+```{r}
+# histogram of r-hat values
+mcmc_rhat_hist(rhat(pyMDE_m1)) +
+  ggtitle("Histogram of model parameter r-hat values",
+          "Model 1: Age-adjusted intersectional") +
+  theme_clean() +
+  theme(axis.title = element_text(face="bold")) +
+  labs(y="Frequency", x="r-hat values")
+
+# Rename parameter labels 
+# This is done to aid chart comprehension
+pyMDE_m1_array = renameArray(fit = pyMDE_m1,
+                             names = strataName,
+                             start = 48,
+                             finish = 89)
+dimnames(pyMDE_m1_array)[[3]][4] = "Intercept"
+dimnames(pyMDE_m1_array)[[3]][5] = "Standard deviation"
+
+# Autocorrelation plots
+autocor_plots(array = pyMDE_m1_array, 
+        parsList = c("Intercept", 
+                     "Standard deviation", 
+                     strataName[1:42]))
+
+# Trace plots for each parameter
+trace_plots(array = pyMDE_m1_array,
+            parsList = c("Intercept",
+                         "Standard deviation",
+                         strataName[1:42]))
+```
+
+### Model estimates
+
+```{r}
+# get table of prevalence estimates
+pyMDE_prevalence = prevalence(fit = pyMDE_m1, 
+                              n_iter = 16000,
+                              group_names = strataName,
+                              short_names = strataNameShort)
+```
+
+## Model 2a: Race/ethnicity and age-adjusted model
+
+### Convergence diagnostics
+
+```{r}
+# histogram of r-hat values
+mcmc_rhat_hist(rhat(pyMDE_m2a)) +
+  ggtitle("Histogram of model parameter r-hat values",
+          "Model 2a: Race/ethnicity and age-adjusted intersectional") +
+  theme_clean() +
+  theme(axis.title = element_text(face="bold")) +
+  labs(y="Frequency", x="r-hat values")
+
+# Rename parameter labels
+pyMDE_m2a_array = as.array(pyMDE_m2a)
+dimnames(pyMDE_m2a_array)[[3]][4] = "Asian"
+dimnames(pyMDE_m2a_array)[[3]][5] = "Black"
+dimnames(pyMDE_m2a_array)[[3]][6] = "Hispanic/Latine"
+dimnames(pyMDE_m2a_array)[[3]][7] = "NAAN"
+dimnames(pyMDE_m2a_array)[[3]][8] = "NHPI"
+dimnames(pyMDE_m2a_array)[[3]][9] = "Multiracial"
+dimnames(pyMDE_m2a_array)[[3]][10] = "Intercept"
+dimnames(pyMDE_m2a_array)[[3]][11] = "Standard deviation"
+# Save parameter names into a vector to be called below
+parsList_m2a = c("Asian","Black","Hispanic/Latine",
+                 "NAAN","NHPI","Multiracial",
+                 "Intercept","Standard deviation")
+
+# Autocorrelation plots
+autocor_plots(array = pyMDE_m2a_array, 
+              parsList = parsList_m2a)
+
+# Trace plots for each parameter
+trace_plots(array = pyMDE_m2a_array,
+            parsList = parsList_m2a)
+```
+
+### Model estimates
+
+```{r}
+# Get ORs and CIs
+pyMDE_m2a_estimates = pyMDE_m2a_sum %>% 
+      # keep rows with 
+  filter(row_number() %in% c(4:9)) %>% 
+  mutate(
+    parameter = c("Asian", 
+                  "Black/African-American",
+                  "Hispanic/Latine",
+                  "Native American / Alaskan Native",
+                  "Native Hawaiian / Pacific Islander",
+                  "Multiracial"),
+    OR = format(round(exp(mean),digits=2),nsmall=2),
+    LB = format(round(exp(`2.5%`),digits=2),nsmall=2),
+    UB = format(round(exp(`97.5%`),digits=2),nsmall=2),
+    est = paste(OR," (",LB,", ",UB,")", sep="")
+  ) %>% 
+  select(parameter, est)
+```
+
+## Model 2b: Gender and age-adjusted model
+
+### Convergence diagnostics
+
+```{r}
+# histogram of r-hat values
+mcmc_rhat_hist(rhat(pyMDE_m2b)) +
+  ggtitle("Histogram of model parameter r-hat values",
+          "Model 2b: Gender and age-adjusted intersectional") +
+  theme_clean() +
+  theme(axis.title = element_text(face="bold")) +
+  labs(y="Frequency", x="r-hat values")
+
+
+# Rename parameter labels
+pyMDE_m2b_array = as.array(pyMDE_m2b)
+dimnames(pyMDE_m2b_array)[[3]][4] = "Woman"
+dimnames(pyMDE_m2b_array)[[3]][5] = "Intercept"
+dimnames(pyMDE_m2b_array)[[3]][6] = "Standard deviation"
+# Save parameter names into a vector to be called below
+parsList_m2b = c("Woman","Intercept","Standard deviation")
+
+# Autocorrelation plots
+autocor_plots(array = pyMDE_m2b_array, 
+              parsList = parsList_m2b)
+
+# Trace plots for each parameter
+trace_plots(array = pyMDE_m2b_array,
+            parsList = parsList_m2b)
+```
+
+### Model estimates
+
+```{r}
+
+# Get ORs and CIs
+pyMDE_m2b_estimates = pyMDE_m2b_sum %>% 
+      # keep rows with 
+  filter(row_number() == c(4)) %>% 
+  mutate(
+    parameter = c("Woman"),
+    OR = format(round(exp(mean),digits=2),nsmall=2),
+    LB = format(round(exp(`2.5%`),digits=2),nsmall=2),
+    UB = format(round(exp(`97.5%`),digits=2),nsmall=2),
+    est = paste(OR," (",LB,", ",UB,")", sep="")
+  ) %>% 
+  select(parameter, est)
+
+```
+
+## Model 2c: Sexual Orientation and age-adjusted model
+
+This model adds the fixed effects of sexual orientation to Model 1 as a level 1 covariate.
+
+### Convergence diagnostics
+
+```{r}
+
+# histogram of r-hat values
+mcmc_rhat_hist(rhat(pyMDE_m2c)) +
+  ggtitle("Histogram of model parameter r-hat values",
+          "Model 2c: Sexual orientation and age-adjusted intersectional") +
+  theme_clean() +
+  theme(axis.title = element_text(face="bold")) +
+  labs(y="Frequency", x="r-hat values")
+
+
+# Rename parameter labels
+pyMDE_m2c_array = as.array(pyMDE_m2b)
+dimnames(pyMDE_m2c_array)[[3]][4] = "Gay/Lesbian"
+dimnames(pyMDE_m2c_array)[[3]][5] = "Bisexual"
+dimnames(pyMDE_m2c_array)[[3]][6] = "Intercept"
+dimnames(pyMDE_m2c_array)[[3]][7] = "Standard deviation"
+# Save parameter names into a vector to be called below
+parsList_m2c = c("Gay/Lesbian","Bisexual","Intercept","Standard deviation")
+
+# Autocorrelation plots
+autocor_plots(array = pyMDE_m2c_array, 
+              parsList = parsList_m2c)
+
+# Trace plots for each parameter
+trace_plots(array = pyMDE_m2c_array,
+            parsList = parsList_m2c)
+```
+
+### Model estimates
+
+```{r}
+# Get ORs and CIs
+pyMDE_m2c_estimates = pyMDE_m2c_sum %>% 
+      # keep rows with 
+  filter(row_number() %in% c(4:5)) %>% 
+  mutate(
+    parameter = c("Gay/Lesbian",
+                  "Bisexual"),
+    OR = format(round(exp(mean),digits=2),nsmall=2),
+    LB = format(round(exp(`2.5%`),digits=2),nsmall=2),
+    UB = format(round(exp(`97.5%`),digits=2),nsmall=2),
+    est = paste(OR," (",LB,", ",UB,")", sep="")
+  ) %>% 
+  select(parameter, est)
+```
+
+## Model 3: Fully-adjusted intersectional interaction
+
+### Convergence diagnostics
+
+```{r}
+# histogram of r-hat values
+mcmc_rhat_hist(rhat(pyMDE_m3)) +
+  ggtitle("Histogram of model parameter r-hat values",
+          "Model 3: Intersectional interaction") +
+  theme_clean() +
+  theme(axis.title = element_text(face="bold")) +
+  labs(y="Frequency", x="r-hat values")
+
+# Rename parameter labels
+pyMDE_m3_array = as.array(pyMDE_m3)
+dimnames(pyMDE_m3_array)[[3]][4] = "Asian"
+dimnames(pyMDE_m3_array)[[3]][5] = "Black"
+dimnames(pyMDE_m3_array)[[3]][6] = "Hispanic/Latine"
+dimnames(pyMDE_m3_array)[[3]][7] = "NAAN"
+dimnames(pyMDE_m3_array)[[3]][8] = "NHPI"
+dimnames(pyMDE_m3_array)[[3]][9] = "Multiracial"
+dimnames(pyMDE_m3_array)[[3]][10] = "Woman"
+dimnames(pyMDE_m3_array)[[3]][11] = "Gay/Lesbian"
+dimnames(pyMDE_m3_array)[[3]][12] = "Bisexual"
+dimnames(pyMDE_m3_array)[[3]][13] = "Intercept"
+dimnames(pyMDE_m3_array)[[3]][14] = "Standard deviation"
+# Save parameter names into a vector to be called below
+parsList_m3 = c("Asian","Black","Hispanic/Latine","NAAN","NHPI",
+                "Multiracial","Woman","Gay/Lesbian","Bisexual",
+                "Intercept","Standard deviation")
+
+# Autocorrelation plots
+autocor_plots(array = pyMDE_m3_array, 
+              parsList = parsList_m3)
+
+# Trace plots for each parameter
+trace_plots(array = pyMDE_m3_array,
+            parsList = parsList_m3)
+```
+
+### Model estimates
+
+```{r}
+# Get ORs and CIs
+pyMDE_m3_estimates = pyMDE_m3_sum %>% 
+      # keep rows with 
+  filter(row_number() %in% c(4:12)) %>% 
+  mutate(
+    parameter = c("Asian",
+                  "Black/African-American",
+                  "Hispanic/Latine",
+                  "Native American / Alaskan Native",
+                  "Native Hawaiian / Pacific Islander",
+                  "Multiracial",
+                  "Woman",
+                  "Gay/Lesbian",
+                  "Bisexual"),
+    OR = format(round(exp(mean),digits=2),nsmall=2),
+    LB = format(round(exp(`2.5%`),digits=2),nsmall=2),
+    UB = format(round(exp(`97.5%`),digits=2),nsmall=2),
+    est = paste(OR," (",LB,", ",UB,")", sep="")
+  ) %>% 
+  select(parameter, est)
+```
+
+### Excess or reduced prevalence due to interaction (ERP)
+
+The following code chunks do the following:
+
+1.  Extract intersectional group-level (Level 2) residual posterior distributions.
+
+2.  Calculate ERP (i.e., intersectional interaction effects) by:
+
+    -   **First value:** Summing the additive/fixed effects estimates associated with each intersectional (e.g., for Black bisexual women, these are the gamma coefficients for "Black" + "Bisexual" + "Woman"). As the models were age-adjusted, I additionally included the gamma coefficient for "Age3549" to approximate the midpoint age value in the dataset.
+
+    -   **Second value:** Summing the additive/fixed effects estimates AND the group-specific residual value associated with each intersectional group
+
+    -   Subtracting the second value from the first value. This produces an estimate of how much the prevalence based on additive/fixed effects differs from the actual prevalence in the intersectional group (positive values = greater than expected MDE; negative values = lower than expected MDE).
+
+3.  Finally, I take the mean of the group-specific EPI posterior distributions and calculate 95% credible intervals.
+
+```{r}
+# extract level 2 residuals (intersectional groups)
+pyMDE_level2residuals_m3 = 
+  extract(pyMDE_m3, 
+          pars = paste("r_1_1[", 1:42, "]", sep=""))
+
+# store the data as a matrix
+# each row is an intersectional group (nrow=42)
+pyMDE_level2residuals_m3 = 
+  matrix(unlist(pyMDE_level2residuals_m3), 
+         nrow = length(pyMDE_level2residuals_m3), 
+         byrow = TRUE)
+
+# rename with the name of each intersectional group
+rownames(pyMDE_level2residuals_m3) = c(strataName)
+
+# extract level 1 beta coefficients (level 1 covariates)
+pyMDE_betas_m3 = extract(pyMDE_m3, 
+                          pars = c("Intercept",
+                                   "b[1]","b[2]","b[3]",
+                                   "b[4]","b[5]","b[6]",
+                                   "b[7]","b[8]","b[9]",
+                                   "b[10]","b[11]","b[12]"))
+# rename the list object to improve clarity
+names(pyMDE_betas_m3) = c("intercept",
+                           "age2634", "age3549","age50plus",
+                           "asian", "black", "latine",
+                           "naan", "nhpi", "multiracial",
+                           "woman", "gay", "bisexual")
+
+
+# Calculate the full, additive, and intersectional effects
+pyMDE_effects = calculate_effects(beta = pyMDE_betas_m3,
+                                  residual = pyMDE_level2residuals_m3)
+
+# Summarize the full, additive, and intersectional effects
+pyMDE_fullEffects = 
+  summarize_effects(df = pyMDE_effects$fullEffect)
+pyMDE_additiveEffects = 
+  summarize_effects(df = pyMDE_effects$additiveEffect)
+pyMDE_intersectionalEffects = 
+  summarize_effects(df = pyMDE_effects$intersectionalEffect)
+
+# Change row names to Intersectional Group names
+rownames(pyMDE_fullEffects) = c(strataName)
+rownames(pyMDE_additiveEffects) = c(strataName)
+rownames(pyMDE_intersectionalEffects) = c(strataName)
+```
+
+# AIM 2: Lifetime MDE
+
+This code section works with models estimating lifetime major depressive episodes (MDE).
+
+## Load model fits: Lifetime MDE
+
+```{r}
+## Load model fits (produced via "nsduh_ltMDE_analysis.R")
+##### Note: Ensure model fits are saved in a 'fits/' folder within your
+#####       current working directory.
+ltMDE_m1 = readRDS("02_fits/ltMDE_m1.RDS")
+ltMDE_m2a = readRDS("02_fits/ltMDE_m2a.RDS")
+ltMDE_m2b = readRDS("02_fits/ltMDE_m2b.RDS")
+ltMDE_m2c = readRDS("02_fits/ltMDE_m2c.RDS")
+ltMDE_m3 = readRDS("02_fits/ltMDE_m3.RDS")
+
+## Extract stan_fit objects
+ltMDE_m1 = ltMDE_m1$stan_fit
+ltMDE_m2a = ltMDE_m2a$stan_fit
+ltMDE_m2b = ltMDE_m2b$stan_fit
+ltMDE_m2c = ltMDE_m2c$stan_fit
+ltMDE_m3 = ltMDE_m3$stan_fit
+
+## Extract parameter estimates, effective sample size (ESS), and r-hat 
+## from each model fit. Specify 95% credible intervals.
+ltMDE_m1_sum = as.data.frame(summary(ltMDE_m1,
+                                probs = c(0.025, 0.975))$summary)
+ltMDE_m2a_sum = as.data.frame(summary(ltMDE_m2a,
+                                probs = c(0.025, 0.975))$summary)
+ltMDE_m2b_sum = as.data.frame(summary(ltMDE_m2b,
+                                probs = c(0.025, 0.975))$summary)
+ltMDE_m2c_sum = as.data.frame(summary(ltMDE_m2c,
+                                probs = c(0.025, 0.975))$summary)
+ltMDE_m3_sum = as.data.frame(summary(ltMDE_m3,
+                                probs = c(0.025, 0.975))$summary)
+```
+
+## Variance estimates for all models
+
+```{r}
+# Summarize SD, variance, VPC, and PCV
+ltMDE_var = variance(fits = c(ltMDE_m1, ltMDE_m2a, ltMDE_m2b,
+                              ltMDE_m2c, ltMDE_m3))
+```
+
+## Model 1: Age-adjusted intersectional model
+
+### Convergence diagnostics
+
+```{r}
+# histogram of r-hat values
+mcmc_rhat_hist(rhat(ltMDE_m1)) +
+  ggtitle("Histogram of model parameter r-hat values",
+          "Model 1: Age-adjusted intersectional") +
+  theme_clean() +
+  theme(axis.title = element_text(face="bold")) +
+  labs(y="Frequency", x="r-hat values")
+
+# Rename parameter labels 
+# This is done to aid chart comprehension
+ltMDE_m1_array = renameArray(fit = ltMDE_m1,
+                             names = strataName,
+                             start = 48,
+                             finish = 89)
+dimnames(ltMDE_m1_array)[[3]][4] = "Intercept"
+dimnames(ltMDE_m1_array)[[3]][5] = "Standard deviation"
+
+# Autocorrelation plots
+autocor_plots(array = ltMDE_m1_array, 
+              parsList = c("Intercept", 
+                           "Standard deviation", 
+                           strataName[1:42]))
+
+# Trace plots for each parameter
+trace_plots(array = ltMDE_m1_array,
+            parsList = c("Intercept",
+                         "Standard deviation",
+                         strataName[1:42]))
+```
+
+### Model estimates
+
+```{r}
+# get table of prevalence estimates
+ltMDE_prevalence = prevalence(fit = ltMDE_m1, 
+                              n_iter = 16000,
+                              group_names = strataName,
+                              short_names = strataNameShort)
+```
+
+## Model 2a: Race/ethnicity and age-adjusted model
+
+### Convergence diagnostics
+
+```{r}
+# histogram of r-hat values
+mcmc_rhat_hist(rhat(ltMDE_m2a)) +
+  ggtitle("Histogram of model parameter r-hat values",
+          "Model 2a: Race/ethnicity and age-adjusted intersectional") +
+  theme_clean() +
+  theme(axis.title = element_text(face="bold")) +
+  labs(y="Frequency", x="r-hat values")
+
+# Rename parameter labels
+ltMDE_m2a_array = as.array(ltMDE_m2a)
+dimnames(ltMDE_m2a_array)[[3]][4] = "Asian"
+dimnames(ltMDE_m2a_array)[[3]][5] = "Black"
+dimnames(ltMDE_m2a_array)[[3]][6] = "Hispanic/Latine"
+dimnames(ltMDE_m2a_array)[[3]][7] = "NAAN"
+dimnames(ltMDE_m2a_array)[[3]][8] = "NHPI"
+dimnames(ltMDE_m2a_array)[[3]][9] = "Multiracial"
+dimnames(ltMDE_m2a_array)[[3]][10] = "Intercept"
+dimnames(ltMDE_m2a_array)[[3]][11] = "Standard deviation"
+# Save parameter names into a vector to be called below
+parsList_m2a = c("Asian","Black","Hispanic/Latine",
+                 "NAAN","NHPI","Multiracial",
+                 "Intercept","Standard deviation")
+
+# Autocorrelation plots
+autocor_plots(array = ltMDE_m2a_array, 
+              parsList = parsList_m2a)
+
+# Trace plots for each parameter
+trace_plots(array = ltMDE_m2a_array,
+            parsList = parsList_m2a)
+```
+
+### Model estimates
+
+```{r}
+# Get ORs and CIs
+ltMDE_m2a_estimates = ltMDE_m2a_sum %>% 
+      # keep rows with 
+  filter(row_number() %in% c(4:9)) %>% 
+  mutate(
+    parameter = c("Asian", 
+                  "Black/African-American",
+                  "Hispanic/Latine",
+                  "Native American / Alaskan Native",
+                  "Native Hawaiian / Pacific Islander",
+                  "Multiracial"),
+    OR = format(round(exp(mean),digits=2),nsmall=2),
+    LB = format(round(exp(`2.5%`),digits=2),nsmall=2),
+    UB = format(round(exp(`97.5%`),digits=2),nsmall=2),
+    est = paste(OR," (",LB,", ",UB,")", sep="")
+  ) %>% 
+  select(parameter, est)
+```
+
+## Model 2b: Gender and age-adjusted model
+
+### Convergence diagnostics
+
+```{r}
+# histogram of r-hat values
+mcmc_rhat_hist(rhat(ltMDE_m2b)) +
+  ggtitle("Histogram of model parameter r-hat values",
+          "Model 2b: Gender and age-adjusted intersectional") +
+  theme_clean() +
+  theme(axis.title = element_text(face="bold")) +
+  labs(y="Frequency", x="r-hat values")
+
+# Rename parameter labels
+ltMDE_m2b_array = as.array(ltMDE_m2b)
+dimnames(ltMDE_m2b_array)[[3]][4] = "Woman"
+dimnames(ltMDE_m2b_array)[[3]][5] = "Intercept"
+dimnames(ltMDE_m2b_array)[[3]][6] = "Standard deviation"
+# Save parameter names into a vector to be called below
+parsList_m2b = c("Woman","Intercept","Standard deviation")
+
+# Autocorrelation plots
+autocor_plots(array = ltMDE_m2b_array, 
+              parsList = parsList_m2b)
+
+# Trace plots for each parameter
+trace_plots(array = ltMDE_m2b_array,
+            parsList = parsList_m2b)
+```
+
+### Model estimates
+
+```{r}
+# Get ORs and CIs
+ltMDE_m2b_estimates = ltMDE_m2b_sum %>% 
+      # keep rows with 
+  filter(row_number() == c(4)) %>% 
+  mutate(
+    parameter = c("Woman"),
+    OR = format(round(exp(mean),digits=2),nsmall=2),
+    LB = format(round(exp(`2.5%`),digits=2),nsmall=2),
+    UB = format(round(exp(`97.5%`),digits=2),nsmall=2),
+    est = paste(OR," (",LB,", ",UB,")", sep="")
+  ) %>% 
+  select(parameter, est)
+```
+
+## Model 2c: Sexual Orientation and age-adjusted model
+
+### Convergence diagnostics
+
+```{r}
+# histogram of r-hat values
+mcmc_rhat_hist(rhat(ltMDE_m2c)) +
+  ggtitle("Histogram of model parameter r-hat values",
+          "Model 2c: Sexual orientation and age-adjusted intersectional") +
+  theme_clean() +
+  theme(axis.title = element_text(face="bold")) +
+  labs(y="Frequency", x="r-hat values")
+
+# Rename parameter labels
+ltMDE_m2c_array = as.array(ltMDE_m2b)
+dimnames(ltMDE_m2c_array)[[3]][4] = "Gay/Lesbian"
+dimnames(ltMDE_m2c_array)[[3]][5] = "Bisexual"
+dimnames(ltMDE_m2c_array)[[3]][6] = "Intercept"
+dimnames(ltMDE_m2c_array)[[3]][7] = "Standard deviation"
+# Save parameter names into a vector to be called below
+parsList_m2c = c("Gay/Lesbian","Bisexual","Intercept","Standard deviation")
+
+# Autocorrelation plots
+autocor_plots(array = ltMDE_m2c_array, 
+              parsList = parsList_m2c)
+
+# Trace plots for each parameter
+trace_plots(array = ltMDE_m2c_array,
+            parsList = parsList_m2c)
+```
+
+### Model estimates
+
+```{r}
+# Get ORs and CIs
+ltMDE_m2c_estimates = ltMDE_m2c_sum %>% 
+      # keep rows with 
+  filter(row_number() %in% c(4:5)) %>% 
+  mutate(
+    parameter = c("Gay/Lesbian",
+                  "Bisexual"),
+    OR = format(round(exp(mean),digits=2),nsmall=2),
+    LB = format(round(exp(`2.5%`),digits=2),nsmall=2),
+    UB = format(round(exp(`97.5%`),digits=2),nsmall=2),
+    est = paste(OR," (",LB,", ",UB,")", sep="")
+  ) %>% 
+  select(parameter, est)
+```
+
+## Model 3: Fully-adjusted intersectional interaction
+
+### Convergence diagnostics
+
+```{r}
+# histogram of r-hat values
+mcmc_rhat_hist(rhat(ltMDE_m3)) +
+  ggtitle("Histogram of model parameter r-hat values",
+          "Model 3: Intersectional interaction") +
+  theme_clean() +
+  theme(axis.title = element_text(face="bold")) +
+  labs(y="Frequency", x="r-hat values")
+
+# Rename parameter labels
+ltMDE_m3_array = as.array(ltMDE_m3)
+dimnames(ltMDE_m3_array)[[3]][4] = "Asian"
+dimnames(ltMDE_m3_array)[[3]][5] = "Black"
+dimnames(ltMDE_m3_array)[[3]][6] = "Hispanic/Latine"
+dimnames(ltMDE_m3_array)[[3]][7] = "NAAN"
+dimnames(ltMDE_m3_array)[[3]][8] = "NHPI"
+dimnames(ltMDE_m3_array)[[3]][9] = "Multiracial"
+dimnames(ltMDE_m3_array)[[3]][10] = "Woman"
+dimnames(ltMDE_m3_array)[[3]][11] = "Gay/Lesbian"
+dimnames(ltMDE_m3_array)[[3]][12] = "Bisexual"
+dimnames(ltMDE_m3_array)[[3]][13] = "Intercept"
+dimnames(ltMDE_m3_array)[[3]][14] = "Standard deviation"
+# Save parameter names into a vector to be called below
+parsList_m3 = c("Asian","Black","Hispanic/Latine","NAAN","NHPI",
+                "Multiracial","Woman","Gay/Lesbian","Bisexual",
+                "Intercept","Standard deviation")
+
+# Autocorrelation plots
+autocor_plots(array = ltMDE_m3_array, 
+              parsList = parsList_m3)
+
+# Trace plots
+trace_plots(array = ltMDE_m3_array,
+            parsList = parsList_m3)
+```
+
+### Model estimates
+
+```{r}
+# Get ORs and CIs
+ltMDE_m3_estimates = ltMDE_m3_sum %>% 
+      # keep rows with 
+  filter(row_number() %in% c(4:12)) %>% 
+  mutate(
+    parameter = c("Asian",
+                  "Black/African-American",
+                  "Hispanic/Latine",
+                  "Native American / Alaskan Native",
+                  "Native Hawaiian / Pacific Islander",
+                  "Multiracial",
+                  "Woman",
+                  "Gay/Lesbian",
+                  "Bisexual"),
+    OR = format(round(exp(mean),digits=2),nsmall=2),
+    LB = format(round(exp(`2.5%`),digits=2),nsmall=2),
+    UB = format(round(exp(`97.5%`),digits=2),nsmall=2),
+    est = paste(OR," (",LB,", ",UB,")", sep="")
+  ) %>% 
+  select(parameter, est)
+```
+
+### Excess or reduced prevalence due to interaction (ERP)
+
+The following code chunks do the following:
+
+1.  Extract intersectional group-level (Level 2) residual posterior distributions.
+
+2.  Calculate ERP (i.e., intersectional interaction effects) by:
+
+    -   **First value:** Summing the additive/fixed effects estimates associated with each intersectional group (e.g., for Black bisexual women, these are the gamma coefficients for "Black" + "Bisexual" + "Woman")
+
+    -   **Second value:** Summing the additive/fixed effects estimates *AND* the group-specific residual value associated with each intersectional group
+
+    -   Subtracting the second value from the first value. This produces an estimate of how much the prevalence based on additive/fixed effects differs from the actual prevalence in the intersectional group (positive values = greater than expected MDE; negative values = lower than expected MDE).
+
+3.  Finally, I take the mean of the group-specific ERP posterior distributions and calculate 95% credible intervals.
+
+```{r}
+# extract level 2 residuals (intersectional groups)
+ltMDE_level2residuals_m3 = 
+  extract(ltMDE_m3, 
+          pars = paste("r_1_1[", 1:42, "]", sep=""))
+
+# store the data as a matrix
+# each row is an intersectional group (nrow=42)
+ltMDE_level2residuals_m3 = 
+  matrix(unlist(ltMDE_level2residuals_m3), 
+         nrow = length(ltMDE_level2residuals_m3), 
+         byrow = TRUE)
+
+# rename with the name of each intersectional group
+rownames(ltMDE_level2residuals_m3) = c(strataName)
+
+# extract level 1 beta coefficients (level 1 covariates)
+ltMDE_betas_m3 = extract(ltMDE_m3, 
+                          pars = c("Intercept",
+                                   "b[1]","b[2]","b[3]",
+                                   "b[4]","b[5]","b[6]",
+                                   "b[7]","b[8]","b[9]",
+                                   "b[10]","b[11]","b[12]"))
+
+# rename the list object to improve clarity
+names(ltMDE_betas_m3) = c("intercept",
+                           "age2634", "age3549","age50plus",
+                           "asian", "black", "latine",
+                           "naan", "nhpi", "multiracial",
+                           "woman", "gay", "bisexual")
+
+# Calculate the full, additive, and intersectional effects
+ltMDE_effects = calculate_effects(beta = ltMDE_betas_m3,
+                                  residual = ltMDE_level2residuals_m3)
+
+# Summarize the full, additive, and intersectional effects
+ltMDE_fullEffects = 
+  summarize_effects(df = ltMDE_effects$fullEffect)
+ltMDE_additiveEffects = 
+  summarize_effects(df = ltMDE_effects$additiveEffect)
+ltMDE_intersectionalEffects = 
+  summarize_effects(df = ltMDE_effects$intersectionalEffect)
+
+# Change row names to Intersectional Group names
+rownames(ltMDE_fullEffects) = c(strataName)
+rownames(ltMDE_additiveEffects) = c(strataName)
+rownames(ltMDE_intersectionalEffects) = c(strataName)
+```
+
+# Tables and Figures (main manuscript)
+
+## Figure 1: Prevalence of past-year MDE
+
+```{r figure1, fig.width=12, fig.height=5}
+## plot of predicted prevalence estimates
+# sort the data
+pyMDE_prevalence_sort = pyMDE_prevalence[with(pyMDE_prevalence, 
+                                              order(gender, 
+                                                    sexualOrientation, 
+                                                    race)),]
+
+# Past-year MDE among men
+figure1_men = pyMDE_prevalence_sort %>%
+  filter(gender=="Men") %>% 
+  mutate(short_names=fct_rev(
+    factor(short_names, 
+           levels=short_names))) %>% 
+  ggplot(aes(x=short_names, 
+             y=as.numeric(Mean), 
+             label=Combined)) +
+  coord_flip() +
+  geom_point(size=1.5) +
+  geom_errorbar(aes(ymin=as.numeric(LowerCI), 
+                    ymax=as.numeric(UpperCI))) +
+  geom_label(aes(x = short_names, 
+                 y = as.numeric(UpperCI),
+                 label = Combined),
+            size=3, 
+            hjust=-0.05, 
+            vjust=0.5, 
+            fontface="bold",
+            label.size=0.0001) +
+  ylab(substitute(paste(bold('Age-adjusted prevalence (95% CI)')))) +
+  xlab(substitute(paste(bold("Men")))) +
+  scale_y_continuous(breaks=seq(0,60, by = 5),
+                     limits=c(0,60)) +
+  theme_clean(base_size=9) + 
+  theme(panel.grid.major.y = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        panel.grid.major.x = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        plot.caption = element_text(hjust=0),
+        text = element_text(family="Arial"),
+        axis.text.y = element_text(size=11),
+        axis.text.x = element_text(size=9),
+        axis.title.x = element_text(size=11),
+        axis.title.y = element_text(size=14))
+
+# Past-year MDE among women
+figure1_women = pyMDE_prevalence_sort %>%
+  filter(gender=="Women") %>% 
+  mutate(short_names=fct_rev(
+    factor(short_names, 
+           levels=short_names))) %>% 
+  ggplot(aes(x=short_names, 
+             y=as.numeric(Mean), 
+             label=Combined)) +
+  coord_flip() +
+  geom_point(size=1.5) +
+  geom_errorbar(aes(ymin=as.numeric(LowerCI), 
+                    ymax=as.numeric(UpperCI))) +
+  geom_label(aes(x = short_names, 
+                 y = as.numeric(UpperCI),
+                 label = Combined),
+            size=3, 
+            hjust=-0.05, 
+            vjust=0.5, 
+            fontface="bold",
+            label.size=0.0001) +
+  ylab(substitute(paste(bold('Age-adjusted prevalence (95% CI)')))) +
+  xlab(substitute(paste(bold("Women")))) +
+  scale_y_continuous(breaks=seq(0,60, by = 5),
+                     limits=c(0,60)) +
+  theme_clean(base_size=9) + 
+  theme(panel.grid.major.y = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        panel.grid.major.x = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        plot.caption = element_text(hjust=0),
+        text = element_text(family="Arial"),
+        axis.text.y = element_text(size=11),
+        axis.text.x = element_text(size=9),
+        axis.title.x = element_text(size=11),
+        axis.title.y = element_text(size=14))
+
+# Save the figures
+figure1_women
+ggsave("03_tables_figures/figure1_women.tiff",
+       units=c("in"),
+       width = 12,
+       height = 3.75,
+       dpi = 300)
+
+figure1_men
+ggsave("03_tables_figures/figure1_men.tiff",
+       units=c("in"),
+       width = 12,
+       height = 3.75,
+       dpi = 300)
+
+```
+
+## Figure 2: Prevalence of lifetime MDE
+
+```{r figure2, fig.width=12, fig.height=5}
+## plot of predicted prevalence estimates
+# sort the data
+ltMDE_prevalence_sort = ltMDE_prevalence[with(ltMDE_prevalence, 
+                                              order(gender, 
+                                                    sexualOrientation, 
+                                                    race)),]
+
+# Past-year MDE among men
+figure2_men = ltMDE_prevalence_sort %>%
+  filter(gender=="Men") %>% 
+  mutate(short_names=fct_rev(
+    factor(short_names, 
+           levels=short_names))) %>% 
+  ggplot(aes(x=short_names, 
+             y=as.numeric(Mean), 
+             label=Combined)) +
+  coord_flip() +
+  geom_point(size=1.5) +
+  geom_errorbar(aes(ymin=as.numeric(LowerCI), 
+                    ymax=as.numeric(UpperCI))) +
+  geom_label(aes(x = short_names, 
+                 y = as.numeric(UpperCI),
+                 label = Combined),
+            size=3, 
+            hjust=-0.05, 
+            vjust=0.5, 
+            fontface="bold",
+            label.size=0.0001) +
+  ylab(substitute(paste(bold('Age-adjusted prevalence (95% CI)')))) +
+  xlab(substitute(paste(bold("Men")))) +
+  scale_y_continuous(breaks=seq(0,60, by = 5),
+                     limits=c(0,60)) +
+  theme_clean(base_size=9) + 
+  theme(panel.grid.major.y = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        panel.grid.major.x = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        plot.caption = element_text(hjust=0),
+        text = element_text(family="Arial"),
+        axis.text.y = element_text(size=11),
+        axis.text.x = element_text(size=9),
+        axis.title.x = element_text(size=11),
+        axis.title.y = element_text(size=14))
+
+# Past-year MDE among women
+figure2_women = ltMDE_prevalence_sort %>%
+  filter(gender=="Women") %>% 
+  mutate(short_names=fct_rev(
+    factor(short_names, 
+           levels=short_names))) %>% 
+  ggplot(aes(x=short_names, 
+             y=as.numeric(Mean), 
+             label=Combined)) +
+  coord_flip() +
+  geom_point(size=1.5) +
+  geom_errorbar(aes(ymin=as.numeric(LowerCI), 
+                    ymax=as.numeric(UpperCI))) +
+  geom_label(aes(x = short_names, 
+                 y = as.numeric(UpperCI),
+                 label = Combined),
+            size=3, 
+            hjust=-0.05, 
+            vjust=0.5, 
+            fontface="bold",
+            label.size=0.0001) +
+  ylab(substitute(paste(bold('Age-adjusted prevalence (95% CI)')))) +
+  xlab(substitute(paste(bold("Women")))) +
+  scale_y_continuous(breaks=seq(0,60, by = 5),
+                     limits=c(0,60)) +
+  theme_clean(base_size=9) + 
+  theme(panel.grid.major.y = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        panel.grid.major.x = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        plot.caption = element_text(hjust=0),
+        text = element_text(family="Arial"),
+        axis.text.y = element_text(size=11),
+        axis.text.x = element_text(size=9),
+        axis.title.x = element_text(size=11),
+        axis.title.y = element_text(size=14))
+
+# Save the figures
+figure2_women
+ggsave("03_tables_figures/figure2_women.tiff",
+       units=c("in"),
+       width = 12,
+       height = 3.75,
+       dpi = 300)
+
+figure2_men
+ggsave("03_tables_figures/figure2_men.tiff",
+       units=c("in"),
+       width = 12,
+       height = 3.75,
+       dpi = 300)
+```
+
+## Table 1: Sample characteristics
+
+This code produces a table which summarizes the sample demographic characteristics of the analytic sample derived from the NSDUH 2015-2020. Percentages are design-weighted according to NSDUH survey weights. It exports a formatted table to excel for ease of including in a manuscript. 
+
+```{r}
+# Create the table
+# specify the variable names and levels
+table1_names = c("Dimensions of social identity/position",
+                  "Race/ethnicity",
+                  "  Asian",
+                  "  Black or African-American",
+                  "  Hispanic or Latine",
+                  "  Native American or Alaska Native",
+                  "  Native Hawaiian or Pacific Islander",
+                  "  Multiracial",
+                  "  White",
+                  "Gender",
+                  "  Woman",
+                  "  Man",
+                  "Sexual orientation",
+                  "  Heterosexual",
+                  "  Gay or Lesbian",
+                  "  Bisexual",
+                  "Covariate",
+                  "Age category",
+                  "  18-25",
+                  "  26-34",
+                  "  35-49",
+                  "  50+",
+                  "Outcomes",
+                  "Past-year major depressive episode",
+                  "Lifetime major depressive episode",
+                  "NSDUH data collection year",
+                  "  2015",
+                  "  2016",
+                  "  2017",
+                  "  2018",
+                  "  2019",
+                  "  2020")
+
+# create surey design object
+design = nsduh %>% 
+  svydesign(id = ~ verep,
+            strata = ~ vestr,
+            weights = ~ adjwt6,
+            data = .,
+            nest = TRUE)
+
+# subset design object to those in the analytic sample
+design = subset(design, sp_1==1)
+
+# calculate weighted percents and unweighted counts
+weightedPercents =
+  design %>%
+  tbl_svysummary(
+    include = c(asian, black, hispanic, naan, nhpi, multi, white,
+                woman, man, hetero, gay, bisexual,
+                age1825, age2634, age3549, age50plus,
+                pyMDE, ltMDE, year),
+    digits = list(all_categorical() ~ c(0,1)),
+    statistic = list(all_categorical() ~ "{n_unweighted} ({p}%)"))
+
+# Remove extra rows
+table1_weightedStats = 
+  as.data.frame(weightedPercents$table_body$stat_0[-c(18, 20)])
+# rename column
+colnames(table1_weightedStats) = "stats"
+# Add rows
+table1_weighted = table1_weightedStats %>% 
+  add_row(.after = 0,
+          stats = "") %>% 
+  add_row(.after = 1,
+          stats = "") %>% 
+  add_row(.after = 9,
+          stats = "") %>%
+  add_row(.after = 12,
+          stats = "") %>% 
+  add_row(.after = 16,
+          stats = "") %>%
+  add_row(.after = 17,
+          stats = "") %>% 
+  add_row(.after = 22,
+          stats = "") %>% 
+  add_row(.after = 25,
+          stats = "") %>% 
+  # combine with Table 1 names column
+  cbind(table1_names, .)
+# change column names
+colnames(table1_weighted) = c("Variables", "n (weighted %)")
+
+
+#############
+# EXPORTING #
+#############
+
+# save xlsx file
+openxlsx::write.xlsx(table1_weighted,
+                     file="03_tables_figures/table1.xlsx")
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/table1.xlsx")
+# set column width for PARAMETER to 30
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=37)
+# set column width for model estimates to 15
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2, 
+                       widths=20)
+# change font size to 10 with Arial style
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Arial")
+
+# bold text
+boldStyle = createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle = createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle = createStyle(textDecoration = "Bold",
+                               halign = "CENTER")
+
+# add styles
+addStyle(wb,
+         rows = 1,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = c(2,18,24, 27),
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 2:33,
+         cols = 2,
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 1,
+         cols = 2,
+         sheet = 1,
+         style = boldCenterStyle,
+         gridExpand = TRUE)
+
+# save the final excel workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/table1.xlsx", 
+                       overwrite = TRUE)
+  
+
+```
+
+## Table 2: Past-year MDE model results
+
+This code produces a table which summarizes the MAIHDA regression model results for past-year MDE. It exports a formatted table to excel for ease of including in a manuscript. 
+
+```{r}
+characteristic =  c("  White",
+                    "  Asian",
+                    "  Black or African-American",
+                    "  Hispanic or Latine",
+                    "  Native American or Alaskan Native",
+                    "  Native Hawaiian or Pacific Islander",
+                    "  Multiracial",
+                    "  Man",
+                    "  Woman",
+                    "  Heterosexual",
+                    "  Gay or Lesbian",
+                    "  Bisexual",
+                    "",
+                    "Level 2 Variance (SD)",
+                    "VPC, % (95% CI)",
+                    "PCV, %")
+
+pyMDE_m1_results = c("",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     paste(round(pyMDE_var$var_sd[1,1],4)," (",
+                           round(pyMDE_var$var_sd[1,2],4),")",sep=""),
+                     paste(pyMDE_var$vpc[1,1], " (",
+                           pyMDE_var$vpc[1,2], ", ",
+                           pyMDE_var$vpc[1,3], ")", sep = ""),
+                     "---")
+
+pyMDE_m2a_results =   c("ref",
+                        pyMDE_m2a_estimates$est[1],
+                        pyMDE_m2a_estimates$est[2],
+                        pyMDE_m2a_estimates$est[3],
+                        pyMDE_m2a_estimates$est[4],
+                        pyMDE_m2a_estimates$est[5],
+                        pyMDE_m2a_estimates$est[6],
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        paste(round(pyMDE_var$var_sd[2,1],4)," (",
+                              round(pyMDE_var$var_sd[2,2],4),")",sep=""),
+                        paste(pyMDE_var$vpc[2,1], " (",
+                              pyMDE_var$vpc[2,2], ", ",
+                              pyMDE_var$vpc[2,3], ")", sep = ""),
+                        pyMDE_var$pcv[2])
+
+pyMDE_m2b_results =   c("",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "ref",
+                        pyMDE_m2b_estimates$est[1],
+                        "",
+                        "",
+                        "",
+                        "",
+                        paste(round(pyMDE_var$var_sd[3,1],4)," (",
+                              round(pyMDE_var$var_sd[3,2],4),")",sep=""),
+                        paste(pyMDE_var$vpc[3,1], " (",
+                              pyMDE_var$vpc[3,2], ", ",
+                              pyMDE_var$vpc[3,3], ")", sep = ""),
+                        pyMDE_var$pcv[3])
+
+pyMDE_m2c_results = c("",
+                      "",
+                      "",
+                      "",
+                      "",
+                      "",
+                      "",
+                      "",
+                      "",
+                      "ref",
+                      pyMDE_m2c_estimates$est[1],
+                      pyMDE_m2c_estimates$est[2],
+                      "",
+                      paste(round(pyMDE_var$var_sd[4,1],4)," (",
+                            round(pyMDE_var$var_sd[4,2],4),")",sep=""),
+                      paste(pyMDE_var$vpc[4,1], " (",
+                            pyMDE_var$vpc[4,2], ", ",
+                            pyMDE_var$vpc[4,3], ")", sep = ""),
+                      pyMDE_var$pcv[4])
+
+pyMDE_m3_results = c("ref",
+                     pyMDE_m3_estimates$est[1],
+                     pyMDE_m3_estimates$est[2],
+                     pyMDE_m3_estimates$est[3],
+                     pyMDE_m3_estimates$est[4],
+                     pyMDE_m3_estimates$est[5],
+                     pyMDE_m3_estimates$est[6],
+                     "ref",
+                     pyMDE_m3_estimates$est[7],
+                     "ref",
+                     pyMDE_m3_estimates$est[8],
+                     pyMDE_m3_estimates$est[9],
+                     "",
+                     paste(round(pyMDE_var$var_sd[5,1],4)," (",
+                           round(pyMDE_var$var_sd[5,2],4),")",sep=""),
+                     paste(pyMDE_var$vpc[5,1], " (",
+                           pyMDE_var$vpc[5,2], ", ",
+                           pyMDE_var$vpc[5,3], ")", sep = ""),
+                     pyMDE_var$pcv[5])
+
+
+pyMDE_results = cbind(characteristic, 
+                      pyMDE_m1_results,
+                      pyMDE_m2a_results,
+                      pyMDE_m2b_results,
+                      pyMDE_m2c_results,
+                      pyMDE_m3_results)
+
+# save as a data frame
+table2_pyMDE = as.data.frame(pyMDE_results) %>% 
+  add_row(.after = 0,
+          characteristic = "Race/ethnicity, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2a_results = "",
+          pyMDE_m2b_results = "",
+          pyMDE_m2c_results = "",
+          pyMDE_m3_results = "") %>% 
+  add_row(.after = 8,
+          characteristic = "Gender, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2a_results = "",
+          pyMDE_m2b_results = "",
+          pyMDE_m2c_results = "",
+          pyMDE_m3_results = "") %>%
+   add_row(.after = 11,
+          characteristic = "Sexual orientation, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2a_results = "",
+          pyMDE_m2b_results = "",
+          pyMDE_m2c_results = "",
+          pyMDE_m3_results = "")
+
+# change column names
+colnames(table2_pyMDE) = c("Parameter",
+                            "Model 1",
+                            "Model 2a",
+                            "Model 2b",
+                            "Model 2c",
+                            "Model 3")
+
+
+###############
+## EXPORTING ##
+###############
+
+# save xlsx file
+openxlsx::write.xlsx(table2_pyMDE, file="03_tables_figures/table2_pyMDE.xlsx")
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/table2_pyMDE.xlsx")
+# set column width for PARAMETER to 30
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=32)
+# set column width for model estimates to 15
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2:6, 
+                       widths=15)
+# change font size to 10 with Arial style
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Arial")
+
+# bold text
+boldStyle = createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle = createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle = createStyle(textDecoration = "Bold",
+                               halign = "CENTER")
+# italicized and center-aligned
+italicCenterStyle = createStyle(textDecoration = "Italic",
+                                 halign = "CENTER")
+
+# add styles
+addStyle(wb,
+         rows = 1,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 2:20,
+         cols = 2:6,
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 1,
+         cols = 2:6,
+         sheet = 1,
+         style = boldCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 3,
+         cols = 3:6,
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 11,
+         cols = 4:6,
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 14,
+         cols = 5:6,
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/table2_pyMDE.xlsx", 
+                       overwrite = TRUE)
+
+
+```
+
+## Table 3: Lifetime MDE model results
+
+This code produces a table which summarizes the MAIHDA regression model results for lifetime MDE. It exports a formatted table to excel for ease of including in a manuscript.
+
+```{r}
+
+characteristic = c("  White",
+                    "  Asian",
+                    "  Black or African-American",
+                    "  Hispanic or Latine",
+                    "  Native American or Alaskan Native",
+                    "  Native Hawaiian or Pacific Islander",
+                    "  Multiracial",
+                    "  Man",
+                    "  Woman",
+                    "  Heterosexual",
+                    "  Gay or Lesbian",
+                    "  Bisexual",
+                    "",
+                    "Level 2 Variance (SD)",
+                    "VPC, % (95% CI)",
+                    "PCV, %")
+
+ltMDE_m1_results = c("",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     paste(round(ltMDE_var$var_sd[1,1],4)," (",
+                           round(ltMDE_var$var_sd[1,2],4),")",sep=""),
+                     paste(ltMDE_var$vpc[1,1], " (",
+                           ltMDE_var$vpc[1,2], ", ",
+                           ltMDE_var$vpc[1,3], ")", sep = ""),
+                     "---")
+
+ltMDE_m2a_results = c("ref",
+                        ltMDE_m2a_estimates$est[1],
+                        ltMDE_m2a_estimates$est[2],
+                        ltMDE_m2a_estimates$est[3],
+                        ltMDE_m2a_estimates$est[4],
+                        ltMDE_m2a_estimates$est[5],
+                        ltMDE_m2a_estimates$est[6],
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        paste(round(ltMDE_var$var_sd[2,1],4)," (",
+                              round(ltMDE_var$var_sd[2,2],4),")",sep=""),
+                        paste(ltMDE_var$vpc[2,1], " (",
+                              ltMDE_var$vpc[2,2], ", ",
+                              ltMDE_var$vpc[2,3], ")", sep = ""),
+                        ltMDE_var$pcv[2])
+
+ltMDE_m2b_results =   c("",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "ref",
+                        ltMDE_m2b_estimates$est[1],
+                        "",
+                        "",
+                        "",
+                        "",
+                        paste(round(ltMDE_var$var_sd[3,1],4)," (",
+                              round(ltMDE_var$var_sd[3,2],4),")",sep=""),
+                        paste(ltMDE_var$vpc[3,1], " (",
+                              ltMDE_var$vpc[3,2], ", ",
+                              ltMDE_var$vpc[3,3], ")", sep = ""),
+                        ltMDE_var$pcv[3])
+
+ltMDE_m2c_results = c("",
+                      "",
+                      "",
+                      "",
+                      "",
+                      "",
+                      "",
+                      "",
+                      "",
+                      "ref",
+                      ltMDE_m2c_estimates$est[1],
+                      ltMDE_m2c_estimates$est[2],
+                      "",
+                      paste(round(ltMDE_var$var_sd[4,1],4)," (",
+                            round(ltMDE_var$var_sd[4,2],4),")",sep=""),
+                      paste(ltMDE_var$vpc[4,1], " (",
+                            ltMDE_var$vpc[4,2], ", ",
+                            ltMDE_var$vpc[4,3], ")", sep = ""),
+                      ltMDE_var$pcv[4])
+
+ltMDE_m3_results = c("ref",
+                     ltMDE_m3_estimates$est[1],
+                     ltMDE_m3_estimates$est[2],
+                     ltMDE_m3_estimates$est[3],
+                     ltMDE_m3_estimates$est[4],
+                     ltMDE_m3_estimates$est[5],
+                     ltMDE_m3_estimates$est[6],
+                     "ref",
+                     ltMDE_m3_estimates$est[7],
+                     "ref",
+                     ltMDE_m3_estimates$est[8],
+                     ltMDE_m3_estimates$est[9],
+                     "",
+                     paste(round(ltMDE_var$var_sd[5,1],4)," (",
+                            round(ltMDE_var$var_sd[5,2],4),")",sep=""),
+                     paste(ltMDE_var$vpc[5,1], " (",
+                            ltMDE_var$vpc[5,2], ", ",
+                            ltMDE_var$vpc[5,3], ")", sep = ""),
+                     ltMDE_var$pcv[5])
+
+
+ltMDE_results =  cbind(characteristic, 
+                       ltMDE_m1_results,
+                       ltMDE_m2a_results,
+                       ltMDE_m2b_results,
+                       ltMDE_m2c_results,
+                       ltMDE_m3_results)
+
+# save as a data frame
+table3_ltMDE = as.data.frame(ltMDE_results) %>% 
+  add_row(.after = 0,
+          characteristic = "Race/ethnicity, OR (95% CI)",
+          ltMDE_m1_results = "",
+          ltMDE_m2a_results = "",
+          ltMDE_m2b_results = "",
+          ltMDE_m2c_results = "",
+          ltMDE_m3_results = "") %>% 
+  add_row(.after = 8,
+          characteristic = "Gender, OR (95% CI)",
+          ltMDE_m1_results = "",
+          ltMDE_m2a_results = "",
+          ltMDE_m2b_results = "",
+          ltMDE_m2c_results = "",
+          ltMDE_m3_results = "") %>%
+   add_row(.after = 11,
+          characteristic = "Sexual orientation, OR (95% CI)",
+          ltMDE_m1_results = "",
+          ltMDE_m2a_results = "",
+          ltMDE_m2b_results = "",
+          ltMDE_m2c_results = "",
+          ltMDE_m3_results = "")
+
+# change column names
+colnames(table3_ltMDE) =  c("Parameter",
+                            "Model 1",
+                            "Model 2a",
+                            "Model 2b",
+                            "Model 2c",
+                            "Model 3")
+
+###############
+## EXPORTING ##
+###############
+
+# save xlsx file
+openxlsx::write.xlsx(table3_ltMDE, file="03_tables_figures/table3_ltMDE.xlsx")
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/table3_ltMDE.xlsx")
+# set column width for PARAMETER to 30
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=32)
+# set column width for model estimates to 15
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2:6, 
+                       widths=15)
+# change font size to 10 with Arial style
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Arial")
+
+# bold text
+boldStyle = createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle = createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle = createStyle(textDecoration = "Bold",
+                               halign = "CENTER")
+# italicized and center-aligned
+italicCenterStyle = createStyle(textDecoration = "Italic",
+                                 halign = "CENTER")
+
+# add styles
+addStyle(wb,
+         rows = 1,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 2:20,
+         cols = 2:6,
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 1,
+         cols = 2:6,
+         sheet = 1,
+         style = boldCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 3,
+         cols = 3:6,
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 11,
+         cols = 4:6,
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 14,
+         cols = 5:6,
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/table3_ltMDE.xlsx", 
+                       overwrite = TRUE)
+
+```
+
+## Table 4: Excess/reduced prevalence due to interaction (ERP)
+
+For both past-year and lifetime MDE, this code creates a table that shows the actual prevalence of the outcome and the ERP estimates (i.e., how much excess (or reduced) prevalence is there in a given intersectional group compared to what is expected based on additive/fixed effects estimates). Negative estimates indicate protective intersectional effects (i.e., lower than expected prevalence based on additive/fixed effects), while positive estimates indicate hazardous intersectional effects (i.e., higher than expected prevalence based on additive/fixed effects).
+
+This exports a formatted table to excel for ease of including in a manuscript. I have also produced a simple table in R using the `kableExtra` package.
+
+```{r}
+
+# Past-year MDE
+# save data into table format
+table4_pyMDE = cbind(strataName, 
+                      as.data.frame(pyMDE_intersectionalEffects),
+                      pyMDE_prevalence) %>% 
+  mutate(strataID = c(1:42),
+         prev = format(round(V1,1),nsmall=1),
+         LB = format(round(V2,1),nsmall=1),
+         UB = format(round(V3,1),nsmall=1),
+         combined1 = paste(prev," (",LB,", ",UB,")", sep=""),
+         combined2 = gsub("\\( ", "(", combined1),
+         ERP = gsub("\\,(\\s)(\\s)", ", ", combined2)) %>% 
+  select(strataID, strataName, Combined, ERP)
+# rename columns
+colnames(table4_pyMDE) = c("ID",
+                            "Intersectional group",
+                            "Past-year MDE model",
+                            "Past-year MDE, ERP (95% CI)")
+
+# Lifetime MDE
+# save data into table format
+table4_ltMDE = cbind(strataName, 
+                      as.data.frame(ltMDE_intersectionalEffects),
+                      ltMDE_prevalence) %>% 
+  mutate(strataID = c(1:42),
+         prev = format(round(V1,1),nsmall=1),
+         LB = format(round(V2,1),nsmall=1),
+         UB = format(round(V3,1),nsmall=1),
+         combined1 = paste(prev," (",LB,", ",UB,")", sep=""),
+         combined2 = gsub("\\( ", "(", combined1),
+         ERP = gsub("\\,(\\s)(\\s)", ", ", combined2)) %>% 
+  select(strataID, strataName, Combined, ERP)
+# rename columns
+colnames(table4_ltMDE) = c("ID",
+                            "Intersectional group",
+                            "Lifetime MDE model",
+                            "Lifetime MDE, ERP (95% CI)")
+
+# Merge
+table4 = merge(table4_pyMDE, 
+                table4_ltMDE, 
+                by=c("ID","Intersectional group"))
+table4 = table4[with(table4, order(ID)),] %>% 
+  select(-c(ID)) %>% 
+  add_row(.after=0,
+          `Intersectional group`="",
+          `Past-year MDE model`="Past-year MDE",
+          `Past-year MDE, ERP (95% CI)`="",
+          `Lifetime MDE model`="Lifetime MDE",
+          `Lifetime MDE, ERP (95% CI)`="") %>% 
+  add_row(.after=1,
+          `Intersectional group`="Intersectional group",
+          `Past-year MDE model`="MP (95% CI)",
+          `Past-year MDE, ERP (95% CI)`="ERP (95% CI)",
+          `Lifetime MDE model`="MP (95% CI)",
+          `Lifetime MDE, ERP (95% CI)`="ERP (95% CI)")
+
+
+
+# save xlsx file
+openxlsx::write.xlsx(table4, 
+                     file="03_tables_figures/table4.xlsx",
+                     colNames=FALSE) # remove column names
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/table4.xlsx")
+# set column width for PARAMETER to 30
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=32)
+# set column width for prevalence to 13
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = c(2,4), 
+                       widths=13)
+# set column width for ERP to 12
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = c(3,5), 
+                       widths=12)
+# change font size to 10 with Arial style
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Arial")
+
+
+# bold text
+boldStyle = createStyle(textDecoration = "Bold")
+# center-aligned text with size 8 font
+centerStyle = createStyle(halign = "CENTER",
+                           fontSize = 8)
+# bold and center-aligned
+boldCenterStyle = createStyle(textDecoration = "Bold",
+                               halign = "CENTER")
+# bold and center-aligned with size 8 font
+boldCenterStyle8 = createStyle(textDecoration = "Bold",
+                               halign = "CENTER",
+                               fontSize = 8)
+
+# apply styles
+addStyle(wb,
+         rows = 2,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 3:44,
+         cols = 2:5,
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 1:2,
+         cols = 2:5,
+         sheet = 1,
+         style = boldCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb, # Black gay/lesbian women (significant ERP)
+         rows = 13,
+         cols = 4:5,
+         sheet = 1,
+         style = boldCenterStyle8,
+         gridExpand = TRUE)
+
+# merge cells
+mergeCells(wb,
+           sheet=1,
+           cols = 2:3,
+           rows = 1)
+mergeCells(wb,
+           sheet=1,
+           cols = 4:5,
+           rows = 1)
+
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/table4.xlsx", 
+                       overwrite = TRUE)
+```
+
+# Supplementary/Web Materials
+
+## Table S1: Intersectional group frequencies
+
+```{r}
+
+tableS1 = strata_count_overall
+colnames(tableS1) = c("ID", "Intersectional Group", 
+                      "Lifetime MDE (n=234,722)",
+                      "Past-year MDE (n=234,374)")
+
+# save xlsx file
+openxlsx::write.xlsx(tableS1, 
+                     file="03_tables_figures/tableS1.xlsx",
+                     colNames=TRUE) 
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/tableS1.xlsx")
+# set column width for ID to 4
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=4)
+# set column width for StrataName to 33
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2, 
+                       widths=33)
+# set column width for Counts to 15
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 3:4, 
+                       widths=15)
+# change font size to 10 with Arial style
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Arial")
+
+
+# center-aligned text
+centerStyle = createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle = createStyle(textDecoration = "Bold",
+                               halign = "CENTER",
+                               valign = "CENTER",
+                               wrapText = TRUE)
+
+# apply styles
+addStyle(wb,
+         rows = 1,
+         cols = 1:4,
+         sheet = 1,
+         style = boldCenterStyle)
+addStyle(wb,
+         rows = 2:43,
+         cols = c(1,3,4),
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/tableS1.xlsx", 
+                       overwrite = TRUE)
+
+```
+
+## Table S2: Past-year MDE prevalence estimates
+
+```{r}
+
+tableS2 = pyMDE_prevalence %>%
+  # combine with full group names
+  cbind(., strataName) %>% 
+  # sort ascending by prev. estimate
+  arrange(as.numeric(Mean)) %>% 
+  # rename columns
+  mutate(`Intersectional group` = strataName,
+         `Prevalence (95% CI)` = Combined) %>% 
+  # limit to group names and combined prev. + 95% CI
+  select(`Intersectional group`, `Prevalence (95% CI)`)
+
+###############
+## EXPORTING ##
+###############
+
+# save xlsx file
+openxlsx::write.xlsx(tableS2, 
+                     file="03_tables_figures/tableS2.xlsx",
+                     colNames=TRUE) 
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/tableS2.xlsx")
+# set column width for Intersectional Group to 35
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths = 35)
+# set column width for Prevalence to 20
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2, 
+                       widths = 20)
+# change font size to 10 with Arial style
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Arial")
+# bold text
+boldStyle = createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle = createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle = createStyle(textDecoration = "Bold",
+                               halign = "CENTER",
+                               wrapText = TRUE)
+
+# apply styles
+addStyle(wb,
+         rows = 1,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 1,
+         cols = 2,
+         sheet = 1,
+         style = boldCenterStyle)
+addStyle(wb,
+         rows = 2:43,
+         cols = 2,
+         sheet = 1,
+         style = centerStyle)
+
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/tableS2.xlsx", 
+                       overwrite = TRUE)
+
+```
+
+## Table S3: Lifetime MDE prevalence estimates
+
+```{r}
+
+tableS3 = ltMDE_prevalence %>%
+  # combine with full group names
+  cbind(., strataName) %>% 
+  # sort ascending by prev. estimate
+  arrange(as.numeric(Mean)) %>% 
+  # rename columns
+  mutate(`Intersectional group` = strataName,
+         `Prevalence (95% CI)` = Combined) %>% 
+  # limit to group names and combined prev. + 95% CI
+  select(`Intersectional group`, `Prevalence (95% CI)`)
+
+###############
+## EXPORTING ##
+###############
+
+# save xlsx file
+openxlsx::write.xlsx(tableS3, 
+                     file="03_tables_figures/tableS3.xlsx",
+                     colNames=TRUE) 
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/tableS3.xlsx")
+# set column width for Intersectional Group to 35
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths = 35)
+# set column width for Prevalence to 20
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2, 
+                       widths = 20)
+# change font size to 10 with Arial style
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Arial")
+# bold text
+boldStyle = createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle = createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle = createStyle(textDecoration = "Bold",
+                               halign = "CENTER",
+                               wrapText = TRUE)
+
+# apply styles
+addStyle(wb,
+         rows = 1,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 1,
+         cols = 2,
+         sheet = 1,
+         style = boldCenterStyle)
+addStyle(wb,
+         rows = 2:43,
+         cols = 2,
+         sheet = 1,
+         style = centerStyle)
+
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/tableS3.xlsx", 
+                       overwrite = TRUE)
+
+
+```

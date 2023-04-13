@@ -1,7 +1,15 @@
 # Depression at the intersection of race/ethnicity, sex/gender, and sexual orientation in a nationally representative sample of US adults: A design-weighted MAIHDA
 This repository contains data and code used to support the manuscript "Depression at the intersection of race/ethnicity, sex/gender, and sexual orientation in a nationally representative sample of US adults: A design-weighted MAIHDA."
 
-**This manuscript is currently undergoing peer review.** A **preprint version** (Date: 04/13/2023) is available at:
+**This manuscript is currently undergoing peer review.** A preprint version (Date: 04/13/2023) is available at:
 
-**Manuscript abstract:** <br>
+## Manuscript abstract
+
 This study examined how race/ethnicity, sex/gender, and sexual orientation intersect to socially pattern depression among US adults. We used repeated, cross-sectional data from the 2015-2020 National Survey on Drug Use and Health (NSDUH; n=234,772) to conduct design-weighted multilevel analysis of individual heterogeneity and discriminatory accuracy (MAIHDA) for two outcomes: past-year and lifetime major depressive episode (MDE). With 42 intersectional groups constructed from seven race/ethnicity, two sex/gender, and three sexual orientation categories, we estimated group-specific prevalence and excess/reduced prevalence attributable to intersectional effects (i.e., two-way or higher interactions between identity variables). Models revealed heterogeneity between intersectional groups, with prevalence estimates ranging from 3.4–31.4% (past-year) and 6.7–47.4% (lifetime). Model main effects indicated that people who were Multiracial, White, women, gay/lesbian, or bisexual had greater odds of MDE. Additive effects of race/ethnicity, sex/gender, and sexual orientation explained most between-group variance; however, approximately 3% (past-year) and 12% (lifetime) were attributable to intersectional effects, with some groups experiencing excess/reduced prevalence. For both outcomes, sexual orientation main effects (42.9–54.0%) explained a greater proportion of between-group variance relative to race/ethnicity (10.0–17.1%) and sex/gender (7.5–7.9%). Notably, we extend MAIHDA to calculate nationally representative estimates to open future opportunities to quantify intersectionality with complex sample survey data.
+
+## Overview of repository structure/contents
+
+1. Original data downloaded from NSDUH are available in Stata format in the "/01_original_data" folder. Files were too large to be uploaded directly, so they are stored in zip folders. This data is processed/cleaned using the "01_nsduh_dataManagement.R" file to create the final data file ("nsduh.RDS") used for analysis.
+2. MAIHDA model fits are stored in the "/02_fits" folder. Similar to original data, these are stored in individual zip folders due to their large size.
+3. Tables and figures that are used in the manuscript are stored in the "/03_tables_figures" folder.
+4. All R code for this project is stored in the main folder and is separated into three files: (1) "01_nsduh_dataManagement.R" for data management/cleaning tasks, (2) "02_nsduh_analysis.R" for conducting design-weighted MAIHDA, and (3) "03_nsduh_estimates.R" for generating/summarizing estimates (e.g., model-predicted prevalence, excess/reduced prevalence) for each outcome measure.

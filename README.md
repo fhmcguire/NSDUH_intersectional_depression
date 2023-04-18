@@ -1,7 +1,7 @@
 # Depression at the intersection of race/ethnicity, sex/gender, and sexual orientation in a nationally representative sample of US adults: A design-weighted MAIHDA
 This repository contains data and code used to support the manuscript "Depression at the intersection of race/ethnicity, sex/gender, and sexual orientation in a nationally representative sample of US adults: A design-weighted MAIHDA."
 
-**This manuscript is currently undergoing peer review.** A preprint version (Date: 04/13/2023) is available at:
+**This manuscript is currently undergoing peer review.** A preprint version (Date: 04/13/2023) is available at: https://www.medrxiv.org/content/10.1101/2023.04.13.23288529v1
 
 ## Manuscript abstract
 

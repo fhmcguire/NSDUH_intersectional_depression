@@ -14,7 +14,7 @@ This study examined how race/ethnicity, sex/gender, and sexual orientation inter
 3. All R code for this project is stored in the main folder and is separated into six files:
     * 00_helper_functions.R (store R functions that automate specific tasks)
     * 01_nsduh_dataManagement.R (data management/cleaning tasks)
-    * 02_nsduh_analysis.R (conduct design-weighted MAIHDA [main analysis] and unweighted MAIHDA [senstivity analysis])
+    * 02_nsduh_analysis.R (conduct design-weighted MAIHDA [main analysis] and unweighted MAIHDA [sensitivity analysis])
     * 03_nsduh_estimates.Rmd (generate and summarize model estimates)
     * 04_nsduh_auc.R (create area under the receiver operating characteristic curve [AUC] plots)
     * 05_tables_figures.Rmd (generate tables/figures for the manuscript)

@@ -1,0 +1,1767 @@
+---
+title: "Create tables and figures"
+subtitle: "Depression among US adults at the intersection of race/ethnicity, sex/gender, and sexual orientation: A design-weighted intersectional MAIHDA"
+author: "F. Hunter McGuire, MPH"
+date: "October 11, 2023"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc-location: left
+    code_folding: show
+  pdf_document:
+    toc: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# set global options for how chunks are processed/output
+knitr::opts_chunk$set(message=FALSE, warning=FALSE)
+
+# Load packages
+library(tidyverse) # Load `tidyverse` suite of packages
+library(plyr) # Tools for Splitting, Applying and Combining Data
+library(ggthemes) # Extra themes and functions for `ggplot2`
+library(extrafont) # Extra fonts for creating charts/figures
+library(rstudioapi) # Retrieve information about an RStudio Editor
+library(openxlsx) # xlsx reading, writing, and editing
+library(gtsummary) # Data Summary and Analytic Result Tables
+library(survey) # design-weighted analysis
+
+# set working directory to source file location
+### get full file path
+RMDpath <- rstudioapi::getSourceEditorContext()$path
+### remove file name from file path
+RMDpath <- gsub('/05_tables_figures.Rmd','', RMDpath)
+### set the working directory
+setwd(RMDpath)
+
+# Load NSDUH data frame (2015-2020 combined data collection years)
+nsduh <- readRDS("nsduh.RDS")
+
+# Load helper functions used to extract/manipulate model estimates
+source("00_helper_functions.R")
+```
+
+## Load estimates produced in `03_nsduh_estimates.Rmd`
+
+```{r}
+# original model fits
+pyMDE_m1 <- readRDS("02_fits/weighted_csSampling/pyMDE_m1.RDS")
+pyMDE_m2 <- readRDS("02_fits/weighted_csSampling/pyMDE_m2.RDS")
+pyMDE_m1 <- pyMDE_m1$stan_fit # extract stanfit objects
+pyMDE_m2 <- pyMDE_m2$stan_fit
+ltMDE_m1 <- readRDS("02_fits/weighted_csSampling/ltMDE_m1.RDS")
+ltMDE_m2 <- readRDS("02_fits/weighted_csSampling/ltMDE_m2.RDS")
+ltMDE_m1 <- ltMDE_m1$stan_fit # extract stanfit objects
+ltMDE_m2 <- ltMDE_m2$stan_fit
+  
+# intersectional group counts
+group_count_year <-
+  readRDS("03_tables_figures/model_estimates/group_count_year.RDS")
+
+# prevalence estimates
+pyMDE_prevalence <-
+  readRDS("03_tables_figures/model_estimates/pyMDE_prevalence.RDS")
+ltMDE_prevalence <-
+  readRDS("03_tables_figures/model_estimates/ltMDE_prevalence.RDS")
+
+# model fit summaries
+pyMDE_m1_sum <-
+  readRDS("03_tables_figures/model_estimates/pyMDE_m1_sum.RDS")
+pyMDE_m2_sum <-
+  readRDS("03_tables_figures/model_estimates/pyMDE_m2_sum.RDS")
+ltMDE_m1_sum <-
+  readRDS("03_tables_figures/model_estimates/ltMDE_m1_sum.RDS")
+ltMDE_m2_sum <-
+  readRDS("03_tables_figures/model_estimates/ltMDE_m2_sum.RDS")
+pyMDE_m1_estimates <-
+  readRDS("03_tables_figures/model_estimates/pyMDE_m1_estimates.RDS")
+pyMDE_m2_estimates <-
+  readRDS("03_tables_figures/model_estimates/pyMDE_m2_estimates.RDS")
+ltMDE_m1_estimates <-
+  readRDS("03_tables_figures/model_estimates/ltMDE_m1_estimates.RDS")
+ltMDE_m2_estimates <-
+  readRDS("03_tables_figures/model_estimates/ltMDE_m2_estimates.RDS")
+
+# variance
+pyMDE_var <-
+  readRDS("03_tables_figures/model_estimates/pyMDE_var.RDS")
+ltMDE_var <- 
+  readRDS("03_tables_figures/model_estimates/ltMDE_var.RDS")
+
+# intersectional effects (excess/reduced prevalence)
+pyMDE_effect_summary <-
+  readRDS("03_tables_figures/model_estimates/pyMDE_effect_summary.RDS")
+ltMDE_effect_summary <-
+  readRDS("03_tables_figures/model_estimates/ltMDE_effect_summary.RDS")
+```
+
+## Main manuscript
+
+### Figure 1: Prevalence of past-year MDE
+
+```{r figure1, fig.width=12, fig.height=5}
+## plot of predicted prevalence estimates
+# sort the data by gender, then sexual orientation, then race
+pyMDE_prevalence_sort <-
+  pyMDE_prevalence[with(pyMDE_prevalence,
+                        order(gender,
+                              sexualOrientation, 
+                              race)),]
+
+# Past-year MDE among men
+figure1_men <- pyMDE_prevalence_sort %>%
+  filter(gender=="Men") %>% 
+  mutate(groupNameShort=fct_rev(
+    factor(groupNameShort, 
+           levels=groupNameShort))) %>% 
+  ggplot(aes(x=groupNameShort, 
+             y=as.numeric(Mean), 
+             label=Combined)) +
+  coord_flip() +
+  geom_point(size=1.5) +
+  geom_errorbar(aes(ymin=as.numeric(LowerCI), 
+                    ymax=as.numeric(UpperCI))) +
+  geom_label(aes(x = groupNameShort, 
+                 y = as.numeric(UpperCI),
+                 label = Combined),
+            size=3, 
+            hjust=-0.05, 
+            vjust=0.5, 
+            fontface="bold",
+            label.size=0.0001) +
+  ylab(substitute(paste(bold('Age-standardized prevalence (95% CI)')))) +
+  xlab(substitute(paste(bold("Men")))) +
+  scale_y_continuous(breaks=seq(0,50, by = 5),
+                     limits=c(0,50)) +
+  theme_clean(base_size=9) + 
+  theme(panel.grid.major.y = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        panel.grid.major.x = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        plot.caption = element_text(hjust=0),
+        text = element_text(family="Gadugi"),
+        axis.text.y = element_text(size=11),
+        axis.text.x = element_text(size=9),
+        axis.title.x = element_text(size=11),
+        axis.title.y = element_text(size=14))
+
+# Past-year MDE among women
+figure1_women <- pyMDE_prevalence_sort %>%
+  filter(gender=="Women") %>% 
+  mutate(groupNameShort=fct_rev(
+    factor(groupNameShort, 
+           levels=groupNameShort))) %>% 
+  ggplot(aes(x=groupNameShort, 
+             y=as.numeric(Mean), 
+             label=Combined)) +
+  coord_flip() +
+  geom_point(size=1.5) +
+  geom_errorbar(aes(ymin=as.numeric(LowerCI), 
+                    ymax=as.numeric(UpperCI))) +
+  geom_label(aes(x = groupNameShort, 
+                 y = as.numeric(UpperCI),
+                 label = Combined),
+            size=3, 
+            hjust=-0.05, 
+            vjust=0.5, 
+            fontface="bold",
+            label.size=0.0001) +
+  ylab(substitute(paste(bold('Age-standardized prevalence (95% CI)')))) +
+  xlab(substitute(paste(bold("Women")))) +
+  scale_y_continuous(breaks=seq(0,50, by = 5),
+                     limits=c(0,50)) +
+  theme_clean(base_size=9) + 
+  theme(panel.grid.major.y = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        panel.grid.major.x = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        plot.caption = element_text(hjust=0),
+        text = element_text(family="Gadugi"),
+        axis.text.y = element_text(size=11),
+        axis.text.x = element_text(size=9),
+        axis.title.x = element_text(size=11),
+        axis.title.y = element_text(size=14))
+
+# Save the figures
+figure1_women
+ggsave("03_tables_figures/figure1_women.tiff",
+       units=c("in"),
+       width = 12,
+       height = 3.75,
+       dpi = 300)
+
+figure1_men
+ggsave("03_tables_figures/figure1_men.tiff",
+       units=c("in"),
+       width = 12,
+       height = 3.75,
+       dpi = 300)
+```
+
+### Figure 2: Prevalence of lifetime MDE
+
+```{r figure2, fig.width=12, fig.height=5}
+## plot of predicted prevalence estimates
+# sort the data by gender, then sexual orientation, then race
+ltMDE_prevalence_sort <-
+  ltMDE_prevalence[with(ltMDE_prevalence,
+                        order(gender,
+                              sexualOrientation,
+                              race)),]
+
+# Past-year MDE among men
+figure2_men <- ltMDE_prevalence_sort %>%
+  filter(gender=="Men") %>% 
+  mutate(groupNameShort=fct_rev(
+    factor(groupNameShort, 
+           levels=groupNameShort))) %>% 
+  ggplot(aes(x=groupNameShort, 
+             y=as.numeric(Mean), 
+             label=Combined)) +
+  coord_flip() +
+  geom_point(size=1.5) +
+  geom_errorbar(aes(ymin=as.numeric(LowerCI), 
+                    ymax=as.numeric(UpperCI))) +
+  geom_label(aes(x = groupNameShort, 
+                 y = as.numeric(UpperCI),
+                 label = Combined),
+            size=3, 
+            hjust=-0.05, 
+            vjust=0.5, 
+            fontface="bold",
+            label.size=0.0001) +
+  ylab(substitute(paste(bold('Age-standardized prevalence (95% CI)')))) +
+  xlab(substitute(paste(bold("Men")))) +
+  scale_y_continuous(breaks=seq(0,50, by = 5),
+                     limits=c(0,50)) +
+  theme_clean(base_size=9) + 
+  theme(panel.grid.major.y = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        panel.grid.major.x = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        plot.caption = element_text(hjust=0),
+        text = element_text(family="Gadugi"),
+        axis.text.y = element_text(size=11),
+        axis.text.x = element_text(size=9),
+        axis.title.x = element_text(size=11),
+        axis.title.y = element_text(size=14))
+
+# Past-year MDE among women
+figure2_women <- ltMDE_prevalence_sort %>%
+  filter(gender=="Women") %>% 
+  mutate(groupNameShort=fct_rev(
+    factor(groupNameShort, 
+           levels=groupNameShort))) %>% 
+  ggplot(aes(x=groupNameShort, 
+             y=as.numeric(Mean), 
+             label=Combined)) +
+  coord_flip() +
+  geom_point(size=1.5) +
+  geom_errorbar(aes(ymin=as.numeric(LowerCI), 
+                    ymax=as.numeric(UpperCI))) +
+  geom_label(aes(x = groupNameShort, 
+                 y = as.numeric(UpperCI),
+                 label = Combined),
+            size=3, 
+            hjust=-0.05, 
+            vjust=0.5, 
+            fontface="bold",
+            label.size=0.0001) +
+  ylab(substitute(paste(bold('Age-standardized prevalence (95% CI)')))) +
+  xlab(substitute(paste(bold("Women")))) +
+  scale_y_continuous(breaks=seq(0,50, by = 5),
+                     limits=c(0,50)) +
+  theme_clean(base_size=9) + 
+  theme(panel.grid.major.y = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        panel.grid.major.x = element_line(colour = "gray", 
+                                          linetype = "dotted"),
+        plot.caption = element_text(hjust=0),
+        text = element_text(family="Gadugi"),
+        axis.text.y = element_text(size=11),
+        axis.text.x = element_text(size=9),
+        axis.title.x = element_text(size=11),
+        axis.title.y = element_text(size=14))
+
+# Save the figures
+figure2_women
+ggsave("03_tables_figures/figure2_women.tiff",
+       units=c("in"),
+       width = 12,
+       height = 3.75,
+       dpi = 300)
+
+figure2_men
+ggsave("03_tables_figures/figure2_men.tiff",
+       units=c("in"),
+       width = 12,
+       height = 3.75,
+       dpi = 300)
+```
+
+
+### Table 1: Sample characteristics
+
+This code produces a table which summarizes the sample demographic characteristics of the analytic sample derived from the NSDUH 2015-2020. Percentages are design-weighted according to NSDUH survey weights. It exports a formatted table to excel for ease of including in a manuscript. 
+
+```{r}
+# Create the table
+# specify the variable names and levels
+table1_names <- c("Dimensions of social identity/position",
+                  "Race/ethnicity",
+                  "  Asian",
+                  "  Black or African-American",
+                  "  Hispanic or Latine",
+                  "  Native American or Alaska Native",
+                  "  Native Hawaiian or Pacific Islander",
+                  "  Multiracial",
+                  "  White",
+                  "Gender",
+                  "  Woman",
+                  "  Man",
+                  "Sexual orientation",
+                  "  Heterosexual",
+                  "  Gay or Lesbian",
+                  "  Bisexual",
+                  "Covariate",
+                  "Age category",
+                  "  18-25",
+                  "  26-34",
+                  "  35-49",
+                  "  50+",
+                  "Outcomes",
+                  "Past-year major depressive episode",
+                  "Lifetime major depressive episode",
+                  "NSDUH data collection year",
+                  "  2015",
+                  "  2016",
+                  "  2017",
+                  "  2018",
+                  "  2019",
+                  "  2020")
+
+# create surey design object
+design <- nsduh %>% 
+  svydesign(id = ~ verep,
+            strata = ~ vestr,
+            weights = ~ adjwt6,
+            data = .,
+            nest = TRUE)
+
+# subset design object to those in the analytic sample
+design <- subset(design, sp_1==1)
+
+# calculate weighted percents and unweighted counts
+weightedPercents <-
+  design %>%
+  tbl_svysummary(
+    include = c(asian, black, hispanic, naan, nhpi, multi, white,
+                woman, man, hetero, gay, bisexual,
+                age1825, age2634, age3549, age50plus,
+                pyMDE, ltMDE, year),
+    digits = list(all_categorical() ~ c(0,1)),
+    statistic = list(all_categorical() ~ "{n_unweighted} ({p}%)"))
+
+# Remove extra rows
+table1_weightedStats <- 
+  as.data.frame(weightedPercents$table_body$stat_0[-c(18, 20)])
+# rename column
+colnames(table1_weightedStats) = "stats"
+# Add rows
+table1_weighted = table1_weightedStats %>% 
+  add_row(.after = 0,
+          stats = "") %>% 
+  add_row(.after = 1,
+          stats = "") %>% 
+  add_row(.after = 9,
+          stats = "") %>%
+  add_row(.after = 12,
+          stats = "") %>% 
+  add_row(.after = 16,
+          stats = "") %>%
+  add_row(.after = 17,
+          stats = "") %>% 
+  add_row(.after = 22,
+          stats = "") %>% 
+  add_row(.after = 25,
+          stats = "") %>% 
+  # combine with Table 1 names column
+  cbind(table1_names, .)
+# change column names
+colnames(table1_weighted) = c("Variables", "n (weighted %)")
+
+
+#############
+# EXPORTING #
+#############
+
+# save xlsx file
+openxlsx::write.xlsx(table1_weighted,
+                     file="03_tables_figures/table1.xlsx")
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/table1.xlsx")
+# set column width for PARAMETER to 30
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=37)
+# set column width for model estimates to 15
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2, 
+                       widths=20)
+# change font size
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Gadugi")
+
+# bold text
+boldStyle <- createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle <- createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle <- createStyle(textDecoration = "Bold",
+                               halign = "CENTER")
+
+# add styles
+addStyle(wb,
+         rows = 1,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = c(2,18,24, 27),
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 2:33,
+         cols = 2,
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 1,
+         cols = 2,
+         sheet = 1,
+         style = boldCenterStyle,
+         gridExpand = TRUE)
+
+# save the final excel workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/table1.xlsx", 
+                       overwrite = TRUE)
+```
+
+
+### Table 2: Model results
+
+This code produces a table which summarizes the MAIHDA regression model results for past-year and lifetime MDE. It exports a formatted table to excel for ease of including in a manuscript. 
+
+```{r}
+characteristic <- c("  White",
+                    "  Asian",
+                    "  Black or African-American",
+                    "  Hispanic or Latine",
+                    "  Native American or Alaskan Native",
+                    "  Native Hawaiian or Pacific Islander",
+                    "  Multiracial",
+                    "  Man",
+                    "  Woman",
+                    "  Heterosexual",
+                    "  Gay or Lesbian",
+                    "  Bisexual",
+                    "  18-25",
+                    "  26-34",
+                    "  35-49",
+                    "  50+",
+                    "",
+                    "Level 2 Variance (SD)",
+                    "VPC, % (95% CI)",
+                    "PCV, %")
+
+pyMDE_m1_results <- c("",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "ref",
+                     pyMDE_m1_estimates$est[1],
+                     pyMDE_m1_estimates$est[2],
+                     pyMDE_m1_estimates$est[3],
+                     "",
+                     paste(round(pyMDE_var$var_sd[1,1],4)," (",
+                           round(pyMDE_var$var_sd[1,2],4),")",sep=""),
+                     paste(pyMDE_var$vpc[1,1], " (",
+                           pyMDE_var$vpc[1,2], ", ",
+                           pyMDE_var$vpc[1,3], ")", sep = ""),
+                     "---")
+
+pyMDE_m2_results <- c("ref",
+                     pyMDE_m2_estimates$est[4],
+                     pyMDE_m2_estimates$est[5],
+                     pyMDE_m2_estimates$est[6],
+                     pyMDE_m2_estimates$est[7],
+                     pyMDE_m2_estimates$est[8],
+                     pyMDE_m2_estimates$est[9],
+                     "ref",
+                     pyMDE_m2_estimates$est[10],
+                     "ref",
+                     pyMDE_m2_estimates$est[11],
+                     pyMDE_m2_estimates$est[12],
+                     "ref",
+                     pyMDE_m2_estimates$est[1],
+                     pyMDE_m2_estimates$est[2],
+                     pyMDE_m2_estimates$est[3],
+                     "",
+                     paste(round(pyMDE_var$var_sd[2,1],4)," (",
+                           round(pyMDE_var$var_sd[2,2],4),")",sep=""),
+                     paste(pyMDE_var$vpc[2,1], " (",
+                           pyMDE_var$vpc[2,2], ", ",
+                           pyMDE_var$vpc[2,3], ")", sep = ""),
+                     pyMDE_var$pcv[2])
+
+ltMDE_m1_results <- c("",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "ref",
+                     ltMDE_m1_estimates$est[1],
+                     ltMDE_m1_estimates$est[2],
+                     ltMDE_m1_estimates$est[3],
+                     "",
+                     paste(round(ltMDE_var$var_sd[1,1],4)," (",
+                           round(ltMDE_var$var_sd[1,2],4),")",sep=""),
+                     paste(ltMDE_var$vpc[1,1], " (",
+                           ltMDE_var$vpc[1,2], ", ",
+                           ltMDE_var$vpc[1,3], ")", sep = ""),
+                     "---")
+
+ltMDE_m2_results <- c("ref",
+                     ltMDE_m2_estimates$est[4],
+                     ltMDE_m2_estimates$est[5],
+                     ltMDE_m2_estimates$est[6],
+                     ltMDE_m2_estimates$est[7],
+                     ltMDE_m2_estimates$est[8],
+                     ltMDE_m2_estimates$est[9],
+                     "ref",
+                     ltMDE_m2_estimates$est[10],
+                     "ref",
+                     ltMDE_m2_estimates$est[11],
+                     ltMDE_m2_estimates$est[12],
+                     "ref",
+                     ltMDE_m2_estimates$est[1],
+                     ltMDE_m2_estimates$est[2],
+                     ltMDE_m2_estimates$est[3],
+                     "",
+                     paste(round(ltMDE_var$var_sd[2,1],4)," (",
+                            round(ltMDE_var$var_sd[2,2],4),")",sep=""),
+                     paste(ltMDE_var$vpc[2,1], " (",
+                            ltMDE_var$vpc[2,2], ", ",
+                            ltMDE_var$vpc[2,3], ")", sep = ""),
+                     ltMDE_var$pcv[2])
+
+# combine all model results columns
+results <- cbind(characteristic, 
+                 pyMDE_m1_results,
+                 pyMDE_m2_results,
+                 ltMDE_m1_results,
+                 ltMDE_m2_results)
+
+# save as a data frame
+table2 <- as.data.frame(results) %>% 
+  add_row(.after = 0,
+          characteristic = "Race/ethnicity, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2_results = "",
+          ltMDE_m1_results = "",
+          ltMDE_m2_results = "") %>% 
+  add_row(.after = 8,
+          characteristic = "Gender, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2_results = "",
+          ltMDE_m1_results = "",
+          ltMDE_m2_results = "") %>%
+   add_row(.after = 11,
+          characteristic = "Sexual orientation, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2_results = "",
+          ltMDE_m1_results = "",
+          ltMDE_m2_results = "") %>%
+   add_row(.after = 15,
+          characteristic = "Age category, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2_results = "",
+          ltMDE_m1_results = "",
+          ltMDE_m2_results = "")
+
+# change column names
+colnames(table2) <- c("Parameter",
+                      "Model 1",
+                      "Model 2",
+                      "Model 1",
+                      "Model 2")
+
+
+###############
+## EXPORTING ##
+###############
+
+# save xlsx file
+openxlsx::write.xlsx(table2, file="03_tables_figures/table2.xlsx")
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/table2.xlsx")
+# set column width for PARAMETER to 30
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=32)
+# set column width for model estimates to 15
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2:5, 
+                       widths=15)
+# change font size
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Gadugi")
+
+# bold text
+boldStyle <- createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle <- createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle <- createStyle(textDecoration = "Bold",
+                               halign = "CENTER")
+# italicized and center-aligned
+italicCenterStyle <- createStyle(textDecoration = "Italic",
+                                 halign = "CENTER")
+
+# add styles
+addStyle(wb,
+         rows = 1,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 2:25,
+         cols = 2:5,
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 1,
+         cols = 2:5,
+         sheet = 1,
+         style = boldCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 3,
+         cols = c(3,5),
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 11,
+         cols = c(3,5),
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 14,
+         cols = c(3,5),
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 18,
+         cols = 2:5,
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/table2.xlsx", 
+                       overwrite = TRUE)
+
+```
+
+### Table 3: Total, main, and intersectional effects
+
+```{r}
+# Merge past-year and lifetime estimates
+table3 <- merge(x = pyMDE_effect_summary, 
+                y = ltMDE_effect_summary,
+                by = c("Group ID", "Intersectional Group"))
+
+table3 <- table3[with(table3, order(`Group ID`)),] %>% 
+  select(-c(`Group ID`)) %>% 
+  add_row(.after=0,
+          `Intersectional Group` = "",
+          `PY Total Effects (95% CI)` = "Past-year MDE",
+          `PY Main Effects (95% CI)` = "",
+          `PY % Point Diff.` = "",
+          `PY % Diff.` = "",
+          `LT Total Effects (95% CI)` = "Lifetime MDE",
+          `LT Main Effects (95% CI)` = "",
+          `LT % Point Diff.` = "",
+          `LT % Diff.` = "") %>% 
+  add_row(.after=1,
+          `Intersectional Group`="Intersectional Group",
+          `PY Total Effects (95% CI)`="Total Effects (95% CI)",
+          `PY Main Effects (95% CI)`="Main Effects (95% CI)",
+          `PY % Point Diff.`="Intersectional Interaction Effects (95% CI)",
+          `PY % Diff.` = "",
+          `LT Total Effects (95% CI)`="Total Effects (95% CI)",
+          `LT Main Effects (95% CI)`=" Main Effects (95% CI)",
+          `LT % Point Diff.`="Intersectional Interaction Effects (95% CI)",
+          `LT % Diff.` = "") %>% 
+  add_row(.after=2,
+          `Intersectional Group`="",
+          `PY Total Effects (95% CI)`="",
+          `PY Main Effects (95% CI)`="",
+          `PY % Point Diff.`="% Point Diff.",
+          `PY % Diff.` = "% Diff.",
+          `LT Total Effects (95% CI)`="",
+          `LT Main Effects (95% CI)`="",
+          `LT % Point Diff.`="% Point Diff.",
+          `LT % Diff.` = "% Diff.")
+
+
+# save xlsx file
+openxlsx::write.xlsx(table3, 
+                     file="03_tables_figures/table3.xlsx",
+                     colNames=FALSE) # remove column names
+# reload into R in xlsx format
+wb <- openxlsx::loadWorkbook(file="03_tables_figures/table3.xlsx")
+# set column widths
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=35)
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2:9, 
+                       widths=17)
+# change font size/style
+modifyBaseFont(wb, 
+               fontSize = 7, 
+               fontColour = "black", 
+               fontName = "Gadugi")
+
+
+# bold text
+boldStyle <- createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle <- createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle <- createStyle(textDecoration = "Bold",
+                               halign = "CENTER",
+                              wrapText = TRUE)
+
+# apply styles
+addStyle(wb,
+         rows = 2,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 3:45,
+         cols = 2:9,
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 1:3,
+         cols = 2:9,
+         sheet = 1,
+         style = boldCenterStyle,
+         gridExpand = TRUE)
+
+
+# merge cells
+mergeCells(wb,
+           sheet = 1,
+           cols = 2:5,
+           rows = 1)
+mergeCells(wb, 
+           sheet = 1,
+           cols = 6:9,
+           rows = 1)
+mergeCells(wb,
+           sheet = 1,
+           cols = 4:5,
+           rows = 2)
+mergeCells(wb,
+           sheet = 1,
+           cols = 8:9,
+           rows = 2)
+
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/table3.xlsx", 
+                       overwrite = TRUE)
+```
+
+
+## Supplementary/Web Materials
+
+### Table S1: Intersectional group frequencies overall & by year
+
+```{r}
+tableS1 <- group_count_year %>% 
+  select(`ID` = groupID,
+         `Intersectional Group` = groupName,
+         `Overall (n=234,722)` = overall, 
+         `2015 (n=42,547)` = `2015`, 
+         `2016 (n=41,626)` = `2016`, 
+         `2017 (n=41,534)` = `2017`, 
+         `2018 (n=41,837)` = `2018`, 
+         `2019 (n=41,547)` = `2019`, 
+         `2020 (n=25,631)` = `2020`)
+
+
+# save xlsx file
+openxlsx::write.xlsx(tableS1, 
+                     file="03_tables_figures/tableS1.xlsx",
+                     colNames=TRUE) 
+# reload into R in xlsx format
+wb <- openxlsx::loadWorkbook(file="03_tables_figures/tableS1.xlsx")
+# set column width for ID
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=4)
+# set column width for groupName
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2, 
+                       widths=33)
+# set column width for Counts
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 3:9, 
+                       widths=12)
+# change font size to 9 with Gadugi style
+modifyBaseFont(wb, 
+               fontSize = 9, 
+               fontColour = "black", 
+               fontName = "Gadugi")
+
+
+# center-aligned text
+centerStyle <- createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle <- createStyle(textDecoration = "Bold",
+                               halign = "CENTER",
+                               valign = "CENTER",
+                               wrapText = TRUE)
+
+# apply styles
+addStyle(wb,
+         rows = 1,
+         cols = 1:9,
+         sheet = 1,
+         style = boldCenterStyle)
+addStyle(wb,
+         rows = 2:43,
+         cols = c(1,3:9),
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/tableS1.xlsx", 
+                       overwrite = TRUE)
+```
+
+### Table S2: Design-weighted model summaries and convergence diagnostics
+
+```{r}
+# grab all parameter names that are formatted like one of:
+#   r_1_1[1] or lp or b[1] or Intercept
+m1_params <- 
+  grep("^r_1_1\\[\\d+\\]$|lp|b\\[\\d+\\]|\\bIntercept\\b|sd", 
+       names(pyMDE_m1), 
+       value = TRUE)
+m2_params <- 
+  grep("^r_1_1\\[\\d+\\]$|lp|b\\[\\d+\\]|\\bIntercept\\b|sd", 
+       names(pyMDE_m2), 
+       value = TRUE)
+
+# load file with parameter name conversions
+param_names <- read.xlsx("03_tables_figures/parameter_names.xlsx")
+
+# reformat the summary table
+tableS2_A <- pyMDE_m1_sum %>% 
+  filter(row.names(.) %in% m1_params) %>% 
+  select(Mean = mean, `SE of Mean` = se_mean, SD = sd,
+         LB = `2.5%`, UB = `97.5%`, ESS = `n_eff`,
+         `R-hat` = Rhat) %>%
+  # round standard error to 4 digits
+  mutate(`SE of Mean` = round(`SE of Mean`, digits = 4)) %>% 
+  # round all other estimates to 2 digits
+  mutate_at(vars(-`SE of Mean`), ~ round(., digits = 2)) %>% 
+  mutate(`Coefficient mean (95% CI)` =
+           paste(Mean, " (", LB, ", ", UB, ")", sep="")) %>%
+  # get rownames as a variable
+  mutate(param = rownames(.)) %>%
+  # merge to get formatted parameter names
+  merge(x = ., y = param_names, by = "param") %>% 
+  arrange(order) %>% 
+  select(Parameter, `Coefficient mean (95% CI)`, `SE of Mean`, SD, ESS, `R-hat`)
+
+# reformat the summary table
+tableS2_B <- pyMDE_m2_sum %>% 
+  filter(row.names(.) %in% m2_params) %>% 
+  select(Mean = mean, `SE of Mean` = se_mean, SD = sd,
+         LB = `2.5%`, UB = `97.5%`, ESS = `n_eff`,
+         `R-hat` = Rhat) %>%
+    # round standard error to 4 digits
+  mutate(`SE of Mean` = round(`SE of Mean`, digits = 4), nsmall=2) %>% 
+  # round all other estimates to 2 digits
+  mutate_at(vars(-`SE of Mean`), ~ round(., digits = 2), nsmall=2) %>% 
+  mutate(`Coefficient mean (95% CI)` =
+           paste(Mean, " (", LB, ", ", UB, ")", sep="")) %>% 
+  # get rownames as a variable
+  mutate(param = rownames(.)) %>%
+  # merge to get formatted parameter names
+  merge(x = ., y = param_names, by = "param") %>% 
+  arrange(order) %>% 
+  select(Parameter, `Coefficient mean (95% CI)`, `SE of Mean`, SD, ESS, `R-hat`)
+
+# reformat the summary table
+tableS2_A <- pyMDE_m1_sum %>% 
+  filter(row.names(.) %in% m1_params) %>% 
+  select(Mean = mean, `SE of Mean` = se_mean, SD = sd,
+         LB = `2.5%`, UB = `97.5%`, ESS = `n_eff`,
+         `R-hat` = Rhat) %>%
+  # round standard error to 4 digits
+  mutate(`SE of Mean` = round(`SE of Mean`, digits = 4)) %>% 
+  # round all other estimates to 2 digits
+  mutate_at(vars(-`SE of Mean`), ~ round(., digits = 2)) %>% 
+  mutate(`Coefficient mean (95% CI)` =
+           paste(Mean, " (", LB, ", ", UB, ")", sep="")) %>%
+  # get rownames as a variable
+  mutate(param = rownames(.)) %>%
+  # merge to get formatted parameter names
+  merge(x = ., y = param_names, by = "param") %>% 
+  arrange(order) %>% 
+  select(Parameter, `Coefficient mean (95% CI)`, `SE of Mean`, SD, ESS, `R-hat`)
+
+# reformat the summary table
+tableS2_C <- ltMDE_m1_sum %>% 
+  filter(row.names(.) %in% m2_params) %>% 
+  select(Mean = mean, `SE of Mean` = se_mean, SD = sd,
+         LB = `2.5%`, UB = `97.5%`, ESS = `n_eff`,
+         `R-hat` = Rhat) %>%
+    # round standard error to 4 digits
+  mutate(`SE of Mean` = round(`SE of Mean`, digits = 4), nsmall=2) %>% 
+  # round all other estimates to 2 digits
+  mutate_at(vars(-`SE of Mean`), ~ round(., digits = 2), nsmall=2) %>% 
+  mutate(`Coefficient mean (95% CI)` =
+           paste(Mean, " (", LB, ", ", UB, ")", sep="")) %>% 
+  # get rownames as a variable
+  mutate(param = rownames(.)) %>%
+  # merge to get formatted parameter names
+  merge(x = ., y = param_names, by = "param") %>% 
+  arrange(order) %>% 
+  select(Parameter, `Coefficient mean (95% CI)`, `SE of Mean`, SD, ESS, `R-hat`)
+
+# reformat the summary table
+tableS2_D <- ltMDE_m2_sum %>% 
+  filter(row.names(.) %in% m2_params) %>% 
+  select(Mean = mean, `SE of Mean` = se_mean, SD = sd,
+         LB = `2.5%`, UB = `97.5%`, ESS = `n_eff`,
+         `R-hat` = Rhat) %>%
+    # round standard error to 4 digits
+  mutate(`SE of Mean` = round(`SE of Mean`, digits = 4), nsmall=2) %>% 
+  # round all other estimates to 2 digits
+  mutate_at(vars(-`SE of Mean`), ~ round(., digits = 2), nsmall=2) %>% 
+  mutate(`Coefficient mean (95% CI)` =
+           paste(Mean, " (", LB, ", ", UB, ")", sep="")) %>% 
+  # get rownames as a variable
+  mutate(param = rownames(.)) %>%
+  # merge to get formatted parameter names
+  merge(x = ., y = param_names, by = "param") %>% 
+  arrange(order) %>% 
+  select(Parameter, `Coefficient mean (95% CI)`, `SE of Mean`, SD, ESS, `R-hat`)
+
+
+# save xlsx file
+# Save output into an excel file
+wb <- createWorkbook()
+
+# add individual worksheets for each codebook
+addWorksheet(wb, "Past-year MDE M1")
+writeData(wb, "Past-year MDE M1", tableS2_A)
+addWorksheet(wb, "Past-year MDE M2")
+writeData(wb, "Past-year MDE M2", tableS2_B)
+addWorksheet(wb, "Lifetime MDE M1")
+writeData(wb, "Lifetime MDE M1", tableS2_C)
+addWorksheet(wb, "Lifetime MDE M2")
+writeData(wb, "Lifetime MDE M2", tableS2_D)
+
+
+# create a style for bold text
+boldStyle <- createStyle(textDecoration = "Bold")
+italicStyle <- createStyle(textDecoration = "Italic")
+# change font size & style
+modifyBaseFont(wb,
+               fontSize = 12, 
+               fontColour = "black", 
+               fontName = "Gadugi")
+
+# loop through each Model Summary sheet
+for(curr_sheet in grep("MDE", names(wb), value=TRUE)){
+
+  # set the column widths to auto
+  setColWidths(wb, 
+               sheet = curr_sheet, 
+               cols = 1:6, 
+               widths = "auto")
+  # make the first row bold font
+  addStyle(wb,
+           sheet = curr_sheet,
+           rows = 1,
+           cols = 1:6,
+           style = boldStyle)
+
+}
+
+# save the file
+saveWorkbook(wb, 
+             file = "03_tables_figures/tableS2.xlsx",
+             overwrite = TRUE)
+```
+
+
+### Sensitivity analysis
+
+#### Load sensitivity files
+
+```{r}
+# remove files
+rm(list=ls())
+
+# load sensitivity model fits
+pyMDE_m1 <- readRDS(file = "02_fits/unweighted_brms/pyMDE_m1_unweighted.rds")
+pyMDE_m2 <- readRDS(file = "02_fits/unweighted_brms/pyMDE_m2_unweighted.rds")
+pyMDE_m1 <- pyMDE_m1$fit # Extract stanfit objects
+pyMDE_m2 <- pyMDE_m2$fit
+ltMDE_m1 <- readRDS(file = "02_fits/unweighted_brms/ltMDE_m1_unweighted.rds")
+ltMDE_m2 <- readRDS(file = "02_fits/unweighted_brms/ltMDE_m2_unweighted.rds")
+ltMDE_m1 = ltMDE_m1$fit # Extract stanfit objects
+ltMDE_m2 = ltMDE_m2$fit
+
+# prevalence estimates
+pyMDE_prevalence <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/pyMDE_prevalence.RDS")
+ltMDE_prevalence <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/ltMDE_prevalence.RDS")
+
+# model fit summaries
+pyMDE_m1_sum <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/pyMDE_m1_sum.RDS")
+pyMDE_m2_sum <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/pyMDE_m2_sum.RDS")
+ltMDE_m1_sum <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/ltMDE_m1_sum.RDS")
+ltMDE_m2_sum <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/ltMDE_m2_sum.RDS")
+pyMDE_m1_estimates <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/pyMDE_m1_estimates.RDS")
+pyMDE_m2_estimates <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/pyMDE_m2_estimates.RDS")
+ltMDE_m1_estimates <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/ltMDE_m1_estimates.RDS")
+ltMDE_m2_estimates <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/ltMDE_m2_estimates.RDS")
+
+# variance
+pyMDE_var <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/pyMDE_var.RDS")
+ltMDE_var <- 
+  readRDS("03_tables_figures/model_estimates/sensitivity/ltMDE_var.RDS")
+
+# intersectional effects (excess/reduced prevalence)
+pyMDE_effect_summary <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/pyMDE_effect_summary.RDS")
+ltMDE_effect_summary <-
+  readRDS("03_tables_figures/model_estimates/sensitivity/ltMDE_effect_summary.RDS")
+```
+
+
+
+#### Table S3: Unweighted model summaries and convergence diagnostics
+
+```{r}
+# grab parameter names
+m1_params <- 
+  grep("r_strata|lp|sd|b_", 
+       names(pyMDE_m1), 
+       value = TRUE)
+m2_params <- 
+  grep("r_strata|lp|sd|b_", 
+       names(pyMDE_m2), 
+       value = TRUE)
+
+# load file with parameter name conversions
+param_names <- read.xlsx("03_tables_figures/parameter_names.xlsx",
+                         sheet = "unweighted")
+
+# reformat the summary table
+tableS3_A <- pyMDE_m1_sum %>% 
+  filter(row.names(.) %in% m1_params) %>% 
+  select(Mean = mean, `SE of Mean` = se_mean, SD = sd,
+         LB = `2.5%`, UB = `97.5%`, ESS = `n_eff`,
+         `R-hat` = Rhat) %>%
+  # round standard error to 4 digits
+  mutate(`SE of Mean` = round(`SE of Mean`, digits = 4)) %>% 
+  # round all other estimates to 2 digits
+  mutate_at(vars(-`SE of Mean`), ~ round(., digits = 2)) %>% 
+  mutate(`Coefficient mean (95% CI)` =
+           paste(Mean, " (", LB, ", ", UB, ")", sep="")) %>%
+  # get rownames as a variable
+  mutate(param = rownames(.)) %>%
+  # merge to get formatted parameter names
+  merge(x = ., y = param_names, by = "param") %>% 
+  arrange(order) %>% 
+  select(Parameter, `Coefficient mean (95% CI)`, `SE of Mean`, SD, ESS, `R-hat`)
+
+# reformat the summary table
+tableS3_B <- pyMDE_m2_sum %>% 
+  filter(row.names(.) %in% m2_params) %>% 
+  select(Mean = mean, `SE of Mean` = se_mean, SD = sd,
+         LB = `2.5%`, UB = `97.5%`, ESS = `n_eff`,
+         `R-hat` = Rhat) %>%
+    # round standard error to 4 digits
+  mutate(`SE of Mean` = round(`SE of Mean`, digits = 4), nsmall=2) %>% 
+  # round all other estimates to 2 digits
+  mutate_at(vars(-`SE of Mean`), ~ round(., digits = 2), nsmall=2) %>% 
+  mutate(`Coefficient mean (95% CI)` =
+           paste(Mean, " (", LB, ", ", UB, ")", sep="")) %>% 
+  # get rownames as a variable
+  mutate(param = rownames(.)) %>%
+  # merge to get formatted parameter names
+  merge(x = ., y = param_names, by = "param") %>% 
+  arrange(order) %>% 
+  select(Parameter, `Coefficient mean (95% CI)`, 
+         `SE of Mean`, SD, ESS, `R-hat`)
+
+# reformat the summary table
+tableS3_C <- ltMDE_m1_sum %>% 
+  filter(row.names(.) %in% m2_params) %>% 
+  select(Mean = mean, `SE of Mean` = se_mean, SD = sd,
+         LB = `2.5%`, UB = `97.5%`, ESS = `n_eff`,
+         `R-hat` = Rhat) %>%
+    # round standard error to 4 digits
+  mutate(`SE of Mean` = round(`SE of Mean`, digits = 4), nsmall=2) %>% 
+  # round all other estimates to 2 digits
+  mutate_at(vars(-`SE of Mean`), ~ round(., digits = 2), nsmall=2) %>% 
+  mutate(`Coefficient mean (95% CI)` =
+           paste(Mean, " (", LB, ", ", UB, ")", sep="")) %>% 
+  # get rownames as a variable
+  mutate(param = rownames(.)) %>%
+  # merge to get formatted parameter names
+  merge(x = ., y = param_names, by = "param") %>% 
+  arrange(order) %>% 
+  select(Parameter, `Coefficient mean (95% CI)`, `SE of Mean`, SD, ESS, `R-hat`)
+
+# reformat the summary table
+tableS3_D <- ltMDE_m2_sum %>% 
+  filter(row.names(.) %in% m2_params) %>% 
+  select(Mean = mean, `SE of Mean` = se_mean, SD = sd,
+         LB = `2.5%`, UB = `97.5%`, ESS = `n_eff`,
+         `R-hat` = Rhat) %>%
+    # round standard error to 4 digits
+  mutate(`SE of Mean` = round(`SE of Mean`, digits = 4), nsmall=2) %>% 
+  # round all other estimates to 2 digits
+  mutate_at(vars(-`SE of Mean`), ~ round(., digits = 2), nsmall=2) %>% 
+  mutate(`Coefficient mean (95% CI)` =
+           paste(Mean, " (", LB, ", ", UB, ")", sep="")) %>% 
+  # get rownames as a variable
+  mutate(param = rownames(.)) %>%
+  # merge to get formatted parameter names
+  merge(x = ., y = param_names, by = "param") %>% 
+  arrange(order) %>% 
+  select(Parameter, `Coefficient mean (95% CI)`, `SE of Mean`, SD, ESS, `R-hat`)
+
+
+# save xlsx file
+# Save output into an excel file
+wb <- createWorkbook()
+
+# add individual worksheets for each codebook
+addWorksheet(wb, "Past-year MDE M1")
+writeData(wb, "Past-year MDE M1", tableS3_A)
+addWorksheet(wb, "Past-year MDE M2")
+writeData(wb, "Past-year MDE M2", tableS3_B)
+addWorksheet(wb, "Lifetime MDE M1")
+writeData(wb, "Lifetime MDE M1", tableS3_C)
+addWorksheet(wb, "Lifetime MDE M2")
+writeData(wb, "Lifetime MDE M2", tableS3_D)
+
+
+# create a style for bold text
+boldStyle = createStyle(textDecoration = "Bold")
+italicStyle = createStyle(textDecoration = "Italic")
+# change font size & style
+modifyBaseFont(wb,
+               fontSize = 12, 
+               fontColour = "black", 
+               fontName = "Gadugi")
+
+# loop through each Model Summary sheet
+for(curr_sheet in grep("MDE", names(wb), value=TRUE)){
+
+  # set the column widths to auto
+  setColWidths(wb, 
+               sheet = curr_sheet, 
+               cols = 1:6, 
+               widths = "auto")
+  # make the first row bold font
+  addStyle(wb,
+           sheet = curr_sheet,
+           rows = 1,
+           cols = 1:6,
+           style = boldStyle)
+
+}
+
+# save the file
+saveWorkbook(wb, 
+             file = "03_tables_figures/tableS3.xlsx",
+             overwrite = TRUE)
+```
+
+#### Table S4-A and S4-B: Unweighted model results
+
+This code produces a table which summarizes the MAIHDA regression model results for past-year and lifetime MDE. It exports a formatted table to excel for ease of including in a manuscript. 
+
+```{r}
+characteristic =  c("  White",
+                    "  Asian",
+                    "  Black or African-American",
+                    "  Hispanic or Latine",
+                    "  Native American or Alaskan Native",
+                    "  Native Hawaiian or Pacific Islander",
+                    "  Multiracial",
+                    "  Man",
+                    "  Woman",
+                    "  Heterosexual",
+                    "  Gay or Lesbian",
+                    "  Bisexual",
+                    "  18-25",
+                    "  26-34",
+                    "  35-49",
+                    "  50+",
+                    "",
+                    "Model intercept (95% CI)",
+                    "Level 2 Variance (SD)",
+                    "VPC, % (95% CI)",
+                    "PCV, %")
+
+pyMDE_m1_results = c("",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "ref",
+                     pyMDE_m1_estimates$est[2],
+                     pyMDE_m1_estimates$est[3],
+                     pyMDE_m1_estimates$est[4],
+                     "",
+                     pyMDE_m1_estimates$est[1],
+                     paste(round(pyMDE_var$var_sd[1,1],4)," (",
+                           round(pyMDE_var$var_sd[1,2],4),")",sep=""),
+                     paste(pyMDE_var$vpc[1,1], " (",
+                           pyMDE_var$vpc[1,2], ", ",
+                           pyMDE_var$vpc[1,3], ")", sep = ""),
+                     "---")
+
+pyMDE_m2_results = c("ref",
+                     pyMDE_m2_estimates$est[5],
+                     pyMDE_m2_estimates$est[6],
+                     pyMDE_m2_estimates$est[7],
+                     pyMDE_m2_estimates$est[8],
+                     pyMDE_m2_estimates$est[9],
+                     pyMDE_m2_estimates$est[10],
+                     "ref",
+                     pyMDE_m2_estimates$est[11],
+                     "ref",
+                     pyMDE_m2_estimates$est[12],
+                     pyMDE_m2_estimates$est[13],
+                     "ref",
+                     pyMDE_m2_estimates$est[2],
+                     pyMDE_m2_estimates$est[3],
+                     pyMDE_m2_estimates$est[4],
+                     "",
+                     pyMDE_m2_estimates$est[1],
+                     paste(round(pyMDE_var$var_sd[2,1],4)," (",
+                           round(pyMDE_var$var_sd[2,2],4),")",sep=""),
+                     paste(pyMDE_var$vpc[2,1], " (",
+                           pyMDE_var$vpc[2,2], ", ",
+                           pyMDE_var$vpc[2,3], ")", sep = ""),
+                     pyMDE_var$pcv[2])
+
+ltMDE_m1_results = c("",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "",
+                     "ref",
+                     ltMDE_m1_estimates$est[2],
+                     ltMDE_m1_estimates$est[3],
+                     ltMDE_m1_estimates$est[4],
+                     "",
+                     ltMDE_m1_estimates$est[1],
+                     paste(round(ltMDE_var$var_sd[1,1],4)," (",
+                           round(ltMDE_var$var_sd[1,2],4),")",sep=""),
+                     paste(ltMDE_var$vpc[1,1], " (",
+                           ltMDE_var$vpc[1,2], ", ",
+                           ltMDE_var$vpc[1,3], ")", sep = ""),
+                     "---")
+
+ltMDE_m2_results = c("ref",
+                     ltMDE_m2_estimates$est[5],
+                     ltMDE_m2_estimates$est[6],
+                     ltMDE_m2_estimates$est[7],
+                     ltMDE_m2_estimates$est[8],
+                     ltMDE_m2_estimates$est[9],
+                     ltMDE_m2_estimates$est[10],
+                     "ref",
+                     ltMDE_m2_estimates$est[11],
+                     "ref",
+                     ltMDE_m2_estimates$est[12],
+                     ltMDE_m2_estimates$est[13],
+                     "ref",
+                     ltMDE_m2_estimates$est[2],
+                     ltMDE_m2_estimates$est[3],
+                     ltMDE_m2_estimates$est[4],
+                     "",
+                     ltMDE_m2_estimates$est[1],
+                     paste(round(ltMDE_var$var_sd[2,1],4)," (",
+                            round(ltMDE_var$var_sd[2,2],4),")",sep=""),
+                     paste(ltMDE_var$vpc[2,1], " (",
+                            ltMDE_var$vpc[2,2], ", ",
+                            ltMDE_var$vpc[2,3], ")", sep = ""),
+                     ltMDE_var$pcv[2])
+
+# combine all model results columns
+results = cbind(characteristic, 
+                pyMDE_m1_results,
+                pyMDE_m2_results,
+                ltMDE_m1_results,
+                ltMDE_m2_results)
+
+# save as a data frame
+tableS4 = as.data.frame(results) %>% 
+  add_row(.after = 0,
+          characteristic = "Race/ethnicity, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2_results = "",
+          ltMDE_m1_results = "",
+          ltMDE_m2_results = "") %>% 
+  add_row(.after = 8,
+          characteristic = "Gender, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2_results = "",
+          ltMDE_m1_results = "",
+          ltMDE_m2_results = "") %>%
+   add_row(.after = 11,
+          characteristic = "Sexual orientation, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2_results = "",
+          ltMDE_m1_results = "",
+          ltMDE_m2_results = "") %>%
+   add_row(.after = 15,
+          characteristic = "Age category, OR (95% CI)",
+          pyMDE_m1_results = "",
+          pyMDE_m2_results = "",
+          ltMDE_m1_results = "",
+          ltMDE_m2_results = "")
+
+# change column names
+colnames(tableS4) = c("Parameter",
+                     "Model 1",
+                     "Model 2",
+                     "Model 1",
+                     "Model 2")
+
+
+###############
+## EXPORTING ##
+###############
+
+# save xlsx file
+openxlsx::write.xlsx(tableS4,
+                     file="03_tables_figures/tableS4.xlsx")
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/tableS4.xlsx")
+# set column width for PARAMETER to 30
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=32)
+# set column width for model estimates to 15
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2:5, 
+                       widths=15)
+# change font size
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Gadugi")
+
+# bold text
+boldStyle = createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle = createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle = createStyle(textDecoration = "Bold",
+                               halign = "CENTER")
+# italicized and center-aligned
+italicCenterStyle = createStyle(textDecoration = "Italic",
+                                 halign = "CENTER")
+
+# add styles
+addStyle(wb,
+         rows = 1,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 2:26,
+         cols = 2:5,
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 1,
+         cols = 2:5,
+         sheet = 1,
+         style = boldCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 3,
+         cols = c(3,5),
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 11,
+         cols = c(3,5),
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 14,
+         cols = c(3,5),
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 18,
+         cols = 2:5,
+         sheet = 1,
+         style = italicCenterStyle,
+         gridExpand = TRUE)
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/tableS4.xlsx", 
+                       overwrite = TRUE)
+```
+
+
+#### Table S5: Comparison of unweighted and weighted prevalence estimates
+
+```{r}
+# load weighted prevalence
+pyMDE_weighted <-
+  readRDS("03_tables_figures/model_estimates/pyMDE_prevalence.RDS")
+ltMDE_weighted <-
+  readRDS("03_tables_figures/model_estimates/ltMDE_prevalence.RDS")
+
+tableS5 <- 
+  # load past-year weighted prevalence
+  pyMDE_weighted %>% 
+  select(GroupID, `Intersectional Group`, py_weighted_prev = Combined) %>%
+  # merge with past-year unweighted prevalence
+  merge(x = ., y = pyMDE_prevalence[, c("GroupID", "Combined")],
+        by = "GroupID") %>% 
+  dplyr::rename(py_unweighted_prev = Combined) %>% 
+    # merge with lifetime weighted prevalence
+  merge(x = ., y = ltMDE_weighted[, c("GroupID", "Combined")],
+        by = "GroupID") %>% 
+  dplyr::rename(lt_weighted_prev = Combined) %>% 
+  # merge with lifetime unweighted prevalence
+  merge(x = ., y = ltMDE_prevalence[, c("GroupID", "Combined")],
+        by = "GroupID") %>% 
+  dplyr::rename(lt_unweighted_prev = Combined) %>% 
+  # past-year:
+  # calculate difference between weighted and unweighted
+  mutate(py_weighted = as.numeric(str_extract(py_weighted_prev, "^[^(]+")),
+         py_unweighted = as.numeric(str_extract(py_unweighted_prev, "^[^(]+")),
+         py_diff = py_unweighted - py_weighted,
+         py_diff_pct = round(100*py_diff/py_weighted,1)) %>% 
+  # remove extra columns
+  select(-py_weighted, -py_unweighted) %>% 
+  # lifetime:
+  # calculate difference between weighted and unweighted
+  mutate(lt_weighted = as.numeric(str_extract(lt_weighted_prev, "^[^(]+")),
+         lt_unweighted = as.numeric(str_extract(lt_unweighted_prev, "^[^(]+")),
+         lt_diff = lt_unweighted - lt_weighted,
+         lt_diff_pct = round(100*lt_diff/lt_weighted,1)) %>% 
+  # remove extra columns
+  select(-lt_weighted, -lt_unweighted) %>% 
+  # rename and reorder columns
+  select(GroupID, `Intersectional Group`,
+         `Unweighted Prevalence (95% CI) p` = py_unweighted_prev,
+         `Weighted Prevalence (95% CI) p` = py_weighted_prev,
+         `% Point Diff. p` = py_diff,
+         `% Diff. p` = py_diff_pct,
+         `Unweighted Prevalence (95% CI) l` = lt_unweighted_prev,
+         `Weighted Prevalence (95% CI) l` = lt_weighted_prev,
+         `% Point Diff. l` = lt_diff,
+         `% Diff. l` = lt_diff_pct) %>% 
+  # sort in ascending order by ID
+  arrange(GroupID) %>% 
+  select(-GroupID) # remove ID
+
+
+# Remove extra white space following an open parenthesis:
+# List of variable names to clean
+variables_to_clean <- c("Unweighted Prevalence (95% CI) p", 
+                        "Weighted Prevalence (95% CI) p", 
+                        "Unweighted Prevalence (95% CI) l", 
+                        "Weighted Prevalence (95% CI) l")
+
+# Loop through the specified variables and remove extra white spaces after the open parenthesis
+for (variable in variables_to_clean) {
+  tableS5[[variable]] <- sub("\\(\\s+", "(", tableS5[[variable]])
+}
+
+
+
+# save xlsx file
+openxlsx::write.xlsx(tableS5, 
+                     file="03_tables_figures/tableS5.xlsx")
+# reload into R in xlsx format
+wb = openxlsx::loadWorkbook(file="03_tables_figures/tableS5.xlsx")
+# set column width for Intersectional Group
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=33)
+# set column width for prevalence
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = c(2:3, 6:7), 
+                       widths=15)
+# set column width for difference
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = c(4:5, 8:9), 
+                       widths=8)
+# change font size to 10 with Gadugi style
+modifyBaseFont(wb, 
+               fontSize = 10, 
+               fontColour = "black", 
+               fontName = "Gadugi")
+
+
+# bold text
+boldStyle = createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle = createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle = createStyle(textDecoration = "Bold",
+                               halign = "CENTER")
+
+# apply styles
+addStyle(wb,
+         rows = 1,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 2:43,
+         cols = 2:9,
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 1,
+         cols = 2:9,
+         sheet = 1,
+         style = boldCenterStyle,
+         gridExpand = TRUE)
+
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/tableS5.xlsx", 
+                       overwrite = TRUE)
+```
+
+
+#### Table S6: Unweighted excess/reduced prevalence due to interaction (intersectional effects)
+
+```{r}
+# Merge past-year and lifetime estimates
+tableS6 <- merge(x = pyMDE_effect_summary, 
+                y = ltMDE_effect_summary,
+                by = c("Group ID", "Intersectional Group"))
+
+tableS6 <- tableS6[with(tableS6, order(`Group ID`)),] %>% 
+  select(-c(`Group ID`)) %>% 
+  add_row(.after=0,
+          `Intersectional Group` = "",
+          `PY Total Effects (95% CI)` = "Past-year MDE",
+          `PY Main Effects (95% CI)` = "",
+          `PY % Point Diff.` = "",
+          `PY % Diff.` = "",
+          `LT Total Effects (95% CI)` = "Lifetime MDE",
+          `LT Main Effects (95% CI)` = "",
+          `LT % Point Diff.` = "",
+          `LT % Diff.` = "") %>% 
+  add_row(.after=1,
+          `Intersectional Group`="Intersectional Group",
+          `PY Total Effects (95% CI)`="Total Effects (95% CI)",
+          `PY Main Effects (95% CI)`="Main Effects (95% CI)",
+          `PY % Point Diff.`="Intersectional Interaction Effects (95% CI)",
+          `PY % Diff.` = "",
+          `LT Total Effects (95% CI)`="Total Effects (95% CI)",
+          `LT Main Effects (95% CI)`="Main Effects (95% CI)",
+          `LT % Point Diff.`="Intersectional Interaction Effects (95% CI)",
+          `LT % Diff.` = "") %>% 
+  add_row(.after=2,
+          `Intersectional Group`="",
+          `PY Total Effects (95% CI)`="",
+          `PY Main Effects (95% CI)`="",
+          `PY % Point Diff.`="% Point Diff.",
+          `PY % Diff.` = "% Diff.",
+          `LT Total Effects (95% CI)`="",
+          `LT Main Effects (95% CI)`="",
+          `LT % Point Diff.`="% Point Diff.",
+          `LT % Diff.` = "% Diff.")
+
+
+# save xlsx file
+openxlsx::write.xlsx(tableS6, 
+                     file="03_tables_figures/tableS6.xlsx",
+                     colNames=FALSE) # remove column names
+# reload into R in xlsx format
+wb <- openxlsx::loadWorkbook(file="03_tables_figures/tableS6.xlsx")
+# set column widths
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 1, 
+                       widths=35)
+openxlsx::setColWidths(wb, 
+                       sheet = 1,
+                       cols = 2:9, 
+                       widths=17)
+# change font size/style
+modifyBaseFont(wb, 
+               fontSize = 7, 
+               fontColour = "black", 
+               fontName = "Gadugi")
+
+
+# bold text
+boldStyle <- createStyle(textDecoration = "Bold")
+# center-aligned text
+centerStyle <- createStyle(halign = "CENTER")
+# bold and center-aligned
+boldCenterStyle <- createStyle(textDecoration = "Bold",
+                               halign = "CENTER",
+                              wrapText = TRUE)
+
+# apply styles
+addStyle(wb,
+         rows = 2,
+         cols = 1,
+         sheet = 1,
+         style = boldStyle)
+addStyle(wb,
+         rows = 3:45,
+         cols = 2:9,
+         sheet = 1,
+         style = centerStyle,
+         gridExpand = TRUE)
+addStyle(wb,
+         rows = 1:3,
+         cols = 2:9,
+         sheet = 1,
+         style = boldCenterStyle,
+         gridExpand = TRUE)
+
+
+# merge cells
+mergeCells(wb,
+           sheet = 1,
+           cols = 2:5,
+           rows = 1)
+mergeCells(wb, 
+           sheet = 1,
+           cols = 6:9,
+           rows = 1)
+mergeCells(wb,
+           sheet = 1,
+           cols = 4:5,
+           rows = 2)
+mergeCells(wb,
+           sheet = 1,
+           cols = 8:9,
+           rows = 2)
+
+
+# save the workbook
+openxlsx::saveWorkbook(wb, 
+                       file="03_tables_figures/tableS6.xlsx", 
+                       overwrite = TRUE)
+```
+

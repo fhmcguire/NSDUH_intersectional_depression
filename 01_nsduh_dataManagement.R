@@ -1,62 +1,62 @@
-## ----------------------------------------------------------------------------
-##
-## Script name: nsduh_dataManagement.R
-##
-## Purpose of script: Data management for intersectional MAIHDA of lifetime
-##                    major depressive episode (MDE) and past-year MDE among 
-##                    US adults at the intersection of race/ethnicity, 
-##                    sex/gender, and sexual orientation.
-##
-## Author: F. Hunter McGuire, MPH
-##
-## Date created: 2022-08-27
-## Last update:  2023-04-06
-##
-## --------------------------------
-##
-## Input data:  NSDUH_2015.dta, NSDUH_2016.dta, NSDUH_2017.dta
-##              NSDUH_2018.dta, NSDUH_2019.dta, NSDUH_2020.dta
-##
-## Output data: nsduh.rds (R format)
-##
-## Data source: National Survey on Drug Use and Health (NSDUH) 2015-2020 
-##
-## Variables:
-##
-##    'ltMDE'      = lifetime major depressive episode (0 = no, 1 = yes)
-##    'pyMDE'      = past-year major depressive episode (0 = no, 1 = yes)
-##    'mhservice'  = past-year mental health service use (0 = no, 1 = yes)
-##
-##    'asian'      = race indicator (1 = Asian)
-##    'black'      = race indicator (1 = Black / African-American)
-##    'hispanic'   = race indicator (1 = Hispanic)
-##    'naan'       = race indicator (1 = Native American / Alaskan Native)
-##    'nhpi'       = race indicator (1 = Native Hawaiian / Pacific Islander)
-##    'multi'      = race indicator (1 = Multiracial)
-##    'white'      = race indicator (1 = White)
-##
-##    'woman'      = gender indicator (1 = Woman)
-##    'man'        = gender indicator (1 = Man)
-##
-##    'hetero'     = sexual orientation indicator (1 = Heterosexual)
-##    'gay'        = sexual orientation indicator (1 = Gay / Lesbian)
-##    'bisexual'   = sexual orientation indicator (1 = Bisexual)
-##
-##    'age1217'    = aged 12-17 years old (0 = no, 1 = yes)
-##    'age1825'    = aged 18-25 years old (0 = no, 1 = yes)
-##    'age2634'    = aged 26-34 years old (0 = no, 1 = yes)
-##    'age3549'    = aged 35-49 years old (0 = no, 1 = yes)
-##    'age50plus'  = aged 50+ years old (0 = no, 1 = yes)
-##    
-##    'sp_1'       = subpop for lifetime MDE analysis (0 = no, 1 = yes)
-##    'sp_1'       = subpop for past-year MDE analysis (0 = no, 1 = yes)
-##
-##    'verep'      = NSDUH cluster weights
-##    'vestr'      = NSDUH strata weights
-##    'adjwt6'     = ADJUSTED NSDUH person-level weights for number of data 
-##                   collection years (6 years: 2015-2020)
-##
-## ----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+#
+# Script name: 01_nsduh_dataManagement.R
+#
+# Purpose of script: Data management for intersectional MAIHDA of lifetime
+#                    major depressive episode (MDE) and past-year MDE among 
+#                    US adults at the intersection of race/ethnicity, 
+#                    sex/gender, and sexual orientation.
+#
+# Author: F. Hunter McGuire, MPH
+#
+# Date created: 2022-08-27
+# Last update:  2023-10-11
+#
+# -----------------------------------------------------------------------------
+#
+# Input data:  NSDUH_2015.dta, NSDUH_2016.dta, NSDUH_2017.dta
+#              NSDUH_2018.dta, NSDUH_2019.dta, NSDUH_2020.dta
+#
+# Output data: nsduh.rds (R format)
+#
+# Data source: National Survey on Drug Use and Health (NSDUH) 2015-2020 
+#
+# Variables:
+#
+#    'ltMDE'      = lifetime major depressive episode (0 = no, 1 = yes)
+#    'pyMDE'      = past-year major depressive episode (0 = no, 1 = yes)
+#    'mhservice'  = past-year mental health service use (0 = no, 1 = yes)
+#
+#    'asian'      = race indicator (1 = Asian)
+#    'black'      = race indicator (1 = Black / African-American)
+#    'hispanic'   = race indicator (1 = Hispanic)
+#    'naan'       = race indicator (1 = Native American / Alaskan Native)
+#    'nhpi'       = race indicator (1 = Native Hawaiian / Pacific Islander)
+#    'multi'      = race indicator (1 = Multiracial)
+#    'white'      = race indicator (1 = White)
+#
+#    'woman'      = gender indicator (1 = Woman)
+#    'man'        = gender indicator (1 = Man)
+#
+#    'hetero'     = sexual orientation indicator (1 = Heterosexual)
+#    'gay'        = sexual orientation indicator (1 = Gay / Lesbian)
+#    'bisexual'   = sexual orientation indicator (1 = Bisexual)
+#
+#    'age1217'    = aged 12-17 years old (0 = no, 1 = yes)
+#    'age1825'    = aged 18-25 years old (0 = no, 1 = yes)
+#    'age2634'    = aged 26-34 years old (0 = no, 1 = yes)
+#    'age3549'    = aged 35-49 years old (0 = no, 1 = yes)
+#    'age50plus'  = aged 50+ years old (0 = no, 1 = yes)
+#    
+#    'sp_1'       = subpop for lifetime MDE analysis (0 = no, 1 = yes)
+#    'sp_2'       = subpop for past-year MDE analysis (0 = no, 1 = yes)
+#
+#    'verep'      = NSDUH cluster weights
+#    'vestr'      = NSDUH strata weights
+#    'adjwt6'     = ADJUSTED NSDUH person-level weights for number of data 
+#                   collection years (6 years: 2015-2020)
+#
+# -----------------------------------------------------------------------------
 
 
 
@@ -243,3 +243,30 @@ nsduh <- nsduh %>%
 # Save the final data frame to be used in analysis
 saveRDS(nsduh, file="nsduh.RDS")
 
+
+
+
+# For Methods section on analytic sample:
+# Calculate analytic sample exclusion criteria
+samples <- nsduh %>% 
+  # step 1: older than 18
+  mutate(step1 = ifelse(age1825==0 & age2634==0 &
+                          age3549==0 & age50plus==0, 0, 1),
+         # step 2: non-missing sexual orientation
+         step2 = ifelse(step1 == 1 & !is.na(hetero), 1, 0),
+         # step 3: non-missing past-year MDE
+         step3 = ifelse(step2 == 1 & !is.na(ltMDE), 1, 0),
+         # step 4: non-missing lifetime MDE
+         step4 = ifelse(step3 == 1 & !is.na(pyMDE), 1, 0))
+
+
+table(samples$step1)
+table(samples$step2)
+table(samples$step3)
+
+# missing sexual orientation
+table(samples$step1)[2] - table(samples$step2)[2] 
+# missing lifetime MDE
+table(samples$step2)[2] - table(samples$step3)[2] 
+# missing past-year MDE
+table(samples$step3)[2] - table(samples$step4)[2] 

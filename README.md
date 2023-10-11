@@ -11,8 +11,7 @@ This study examined how race/ethnicity, sex/gender, and sexual orientation inter
 
 1. Original data downloaded from NSDUH are available in Stata format in the "/01_original_data" folder. Files were too large to be uploaded directly, so they are stored in zip folders. This data is processed/cleaned using the "01_nsduh_dataManagement.R" file to create the final data file ("nsduh.RDS") used for analysis.
 2. Ideally, MAIHDA model fits would be stored in a "/02_fits" folder. However, these files are too large to be stored on GitHub, so please inquire directly to request access to the model fits.
-3. Tables and figures that are used in the manuscript are stored in the "/03_tables_figures" folder.
-4. All R code for this project is stored in the main folder and is separated into six files:
+3. All R code for this project is stored in the main folder and is separated into six files:
     * 00_helper_functions.R (store R functions that automate specific tasks)
     * 01_nsduh_dataManagement.R (data management/cleaning tasks)
     * 02_nsduh_analysis.R (conduct design-weighted MAIHDA [main analysis] and unweighted MAIHDA [senstivity analysis])

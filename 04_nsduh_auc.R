@@ -11,7 +11,7 @@
 # Author: F. Hunter McGuire, MPH
 #
 # Date created: 2023-09-01
-# Last update:  2023-10-11
+# Last update:  2024-05-06
 #
 # -----------------------------------------------------------------------------
 
@@ -155,7 +155,7 @@ ggsave("03_tables_figures/roc_pyMDE.tiff",
        units=c("in"),
        width = 9,
        height = 7.5,
-       dpi = 300)
+       dpi = 400)
 
 # lifetime MDE
 pROC::ggroc(ltMDE_roc, color = "black", size = 3) +
@@ -173,7 +173,7 @@ ggsave("03_tables_figures/roc_ltMDE.tiff",
        units=c("in"),
        width = 9,
        height = 7.5,
-       dpi = 300)
+       dpi = 400)
 
 
 

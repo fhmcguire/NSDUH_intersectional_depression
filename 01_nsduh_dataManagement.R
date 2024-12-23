@@ -7,7 +7,7 @@
 #                    US adults at the intersection of race/ethnicity, 
 #                    sex/gender, and sexual orientation.
 #
-# Author: F. Hunter McGuire, MPH
+# Author: F. Hunter McGuire, PhD, MPH
 #
 # Date created: 2022-08-27
 # Last update:  2023-10-11

@@ -2,7 +2,7 @@
 #
 # Script name: 00_helper_functions.R
 #
-# Author: F. Hunter McGuire, MPH
+# Author: F. Hunter McGuire, PhD, MPH
 #
 # Date created: 2022-08-27
 # Last update:  2023-10-11

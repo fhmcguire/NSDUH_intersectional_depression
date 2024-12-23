@@ -2,7 +2,7 @@
 title: "Create tables and figures"
 subtitle: "Depression among US adults at the intersection of race/ethnicity, sex/gender, and sexual orientation: A design-weighted intersectional MAIHDA"
 author: "F. Hunter McGuire, PhD, MPH"
-date: "October 11, 2023"
+date: "December 23, 2024"
 output:
   html_document:
     toc: yes

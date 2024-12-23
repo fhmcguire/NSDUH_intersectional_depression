@@ -19,10 +19,6 @@ editor_options:
 
 The purpose of this file is to summarize estimates from design-weighted Bayesian multilevel models fit with the package `csSampling` (backend `brms` and `rstan`). These models were fit in a previous file named `02_nsduh_analysis.R`.
 
-## Study Abstract (Journal Article)
-
-
-
 ## Model specifications
 
 Individuals (level 1) were nested within intersectional groups (level 2) defined by race/ethnicity, sex/gender, and sexual orientation. Models were fit with Markov chain Monte Carlo (MCMC) with a Bernoulli outcome distribution and logit link. We specified weakly informative priors with variance parameters having an inverse gamma distribution (alpha=2, beta=2) and variable coefficients on the logit scale having a Gaussian distribution (mean=0, standard deviation=2). Four Markov chains were run for 4,000 iterations including 2,000 warmups (total post-warmup iterations per model = 8,000). 
@@ -127,6 +123,11 @@ pyMDE_m1 <- readRDS("02_fits/weighted_csSampling/pyMDE_m1.RDS")
 pyMDE_m2 <- readRDS("02_fits/weighted_csSampling/pyMDE_m2.RDS")
 
 ## Extract stan_fit objects
+## CAUTION: The `stan_fit` objects are NOT variance-adjusted to correct for
+##          dependencies between observations in the NSDUH sampling design.
+##          The `stan_fit` objects are survey-weighted posterior distributions 
+##          that correct results for unequal probabilities of selection and
+##          differential response rates to the survey. 
 pyMDE_m1 <- pyMDE_m1$stan_fit
 pyMDE_m2 <- pyMDE_m2$stan_fit
 
@@ -158,20 +159,26 @@ mcmc_rhat_hist(rhat(pyMDE_m1)) +
   theme(axis.title = element_text(face="bold")) +
   labs(y="Frequency", x="r-hat values")
 
-# Rename parameter labels 
+# Rename parameter labels and save the model fit object as an array
 # This is done to aid chart comprehension
 pyMDE_m1_array <- renameArray(model = pyMDE_m1,
                               names = groupName,
                               start = 48,
                               finish = 89)
-dimnames(pyMDE_m1_array)[[3]][1] = "age_2534"
-dimnames(pyMDE_m1_array)[[3]][2] = "age_3549"
-dimnames(pyMDE_m1_array)[[3]][3] = "age_50plus"
-dimnames(pyMDE_m1_array)[[3]][4] = "Intercept"
-dimnames(pyMDE_m1_array)[[3]][5] = "Between-group std. dev."
+# 10/24/2024 Note: this code was updated to capture the correct intercept,
+# which is "b_Intercept".
+# In a prior version of this code, this was incorrectly identified as the 
+# parameter "Intercept" -- the incorrect "Intercept" parameter is mean-centered
+# and is much lower than the correct "b_Intercept" parameter, which is on the
+# original scale.
+# Therefore, this produced lower prevalence estimates for each intersectional
+# group in our original analysis and publication.
+dimnames(pyMDE_m1_array)[[3]][c(1:3, 5, 91)] <-
+  c("age_2534", "age_3549", "age_50plus", 
+    "Between-group std. dev.", "b_Intercept")
 
 # define parameters to display in plots
-parameters <- c(c(dimnames(pyMDE_m1_array)[[3]][1:5], 
+parameters <- c(c(dimnames(pyMDE_m1_array)[[3]][c(1:3, 5, 91)], 
                   groupName[1:42]))
 
 # Autocorrelation plots
@@ -199,7 +206,9 @@ age_weights <- c(0.138, 0.159, 0.246, 0.456)
 # Generate age-standardized prevalence
 pyMDE_prevalence <-
   age_adj_prevalence(model = pyMDE_m1, 
-                     parameters =  c("Intercept", "b[1]", "b[2]", "b[3]"),
+                     # 10/24/2024 Note: We have updated this to the correct
+                     # intercept parameter ("b_Intercept")
+                     parameters =  c("b_Intercept", "b[1]", "b[2]", "b[3]"),
                      age_weights = age_weights)
 ```
 
@@ -209,12 +218,16 @@ Coefficients
 # Get ORs and CIs
 pyMDE_m1_estimates <- pyMDE_m1_sum %>% 
   # keep rows with beta coefficients
-  filter(row_number() %in% c(1:4)) %>% 
+  # 10/24/2024 Note: We have updated this to the correct intercept parameter 
+  # ("b_Intercept")
+  filter(rownames(.) %in% c("b[1]", "b[2]", "b[3]", "b_Intercept")) %>% 
   mutate(
+    # Create a new column named "parameter" to store parameter names
     parameter = c("26-34",
                   "35-49",
                   "50+",
                   "Intercept"),
+    # Calculate odds ratios and 95% credible intervals
     OR = format(round(exp(mean),digits=2),nsmall=2),
     LB = format(round(exp(`2.5%`),digits=2),nsmall=2),
     UB = format(round(exp(`97.5%`),digits=2),nsmall=2),
@@ -237,24 +250,25 @@ mcmc_rhat_hist(rhat(pyMDE_m2)) +
   labs(y="Frequency", x="r-hat values")
 
 # Rename parameter labels
+# 10/24/2024 Note: this code was updated to capture the correct intercept,
+# which is "b_Intercept".
+# In a prior version of this code, this was incorrectly identified as the 
+# parameter "Intercept" -- the incorrect "Intercept" parameter is mean-centered
+# and is much lower than the correct "b_Intercept" parameter, which is on the
+# original scale.
+# Therefore, this produced lower prevalence estimates for each intersectional
+# group in our original analysis and publication.
 pyMDE_m2_array <- as.array(pyMDE_m2)
-dimnames(pyMDE_m2_array)[[3]][1] = "age_2534"
-dimnames(pyMDE_m2_array)[[3]][2] = "age_3549"
-dimnames(pyMDE_m2_array)[[3]][3] = "age_50plus"
-dimnames(pyMDE_m2_array)[[3]][4] = "Asian"
-dimnames(pyMDE_m2_array)[[3]][5] = "Black"
-dimnames(pyMDE_m2_array)[[3]][6] = "Hispanic/Latine"
-dimnames(pyMDE_m2_array)[[3]][7] = "NAAN"
-dimnames(pyMDE_m2_array)[[3]][8] = "NHPI"
-dimnames(pyMDE_m2_array)[[3]][9] = "Multiracial"
-dimnames(pyMDE_m2_array)[[3]][10] = "Woman"
-dimnames(pyMDE_m2_array)[[3]][11] = "Gay/Lesbian"
-dimnames(pyMDE_m2_array)[[3]][12] = "Bisexual"
-dimnames(pyMDE_m2_array)[[3]][13] = "Intercept"
-dimnames(pyMDE_m2_array)[[3]][14] = "Between-group std. dev."
+dimnames(pyMDE_m2_array)[[3]][c(1:12, 14, 100)] <-
+  c("age_2534", "age_3549", "age_50plus",
+    "Asian", "Black", "Hispanic/Latine", 
+    "NAAN", "NHPI", "Multiracial",
+    "Woman", "Gay/Lesbian", "Bisexual",
+    "Between-group std. dev.", "b_Intercept")
+
 
 # define parameters to display in plots
-parameters <- dimnames(pyMDE_m2_array)[[3]][1:14]
+parameters <- dimnames(pyMDE_m2_array)[[3]][c(1:12, 14, 100)]
 
 # Autocorrelation plots
 autocor_plots(array = pyMDE_m2_array, 
@@ -271,7 +285,13 @@ trace_plots(array = pyMDE_m2_array,
 # Get ORs and CIs
 pyMDE_m2_estimates <- pyMDE_m2_sum %>% 
   # keep rows with beta coefficients
-  filter(row_number() %in% c(1:13)) %>% 
+  # 10/24/2024 Note: We have updated this to the correct intercept parameter 
+  # ("b_Intercept")
+  filter(rownames(.) %in% c("b[1]", "b[2]", "b[3]", 
+                            "b[4]", "b[5]", "b[6]",
+                            "b[7]", "b[8]", "b[9]",
+                            "b[10]", "b[11]", "b[12]",
+                            "b_Intercept")) %>% 
   mutate(
     parameter = c("26-34",
                   "35-49",
@@ -299,7 +319,9 @@ pyMDE_m2_estimates <- pyMDE_m2_sum %>%
 ```{r}
 pyMDE_effects <- 
   calculate_effects(model = pyMDE_m2,
-                    parameters = c("Intercept", "b[1]", "b[2]", "b[3]",
+                    # 10/24/2024 Note: Updated to have the correct intercept
+                    # parameter ("b_Intercept").
+                    parameters = c("b_Intercept", "b[1]", "b[2]", "b[3]",
                                     "b[4]", "b[5]", "b[6]", "b[7]", "b[8]", 
                                     "b[9]", "b[10]", "b[11]", "b[12]"),
                     age_weights = age_weights)
@@ -338,6 +360,11 @@ ltMDE_m1 <- readRDS("02_fits/weighted_csSampling/ltMDE_m1.RDS")
 ltMDE_m2 <- readRDS("02_fits/weighted_csSampling/ltMDE_m2.RDS")
 
 ## Extract stan_fit objects
+## CAUTION: The `stan_fit` objects are NOT variance-adjusted to correct for
+##          dependencies between observations in the NSDUH sampling design.
+##          The `stan_fit` objects are survey-weighted posterior distributions 
+##          that correct results for unequal probabilities of selection and
+##          differential response rates to the survey. 
 ltMDE_m1 <- ltMDE_m1$stan_fit
 ltMDE_m2 <- ltMDE_m2$stan_fit
 
@@ -369,20 +396,26 @@ mcmc_rhat_hist(rhat(ltMDE_m1)) +
   theme(axis.title = element_text(face="bold")) +
   labs(y="Frequency", x="r-hat values")
 
-# Rename parameter labels 
+# Rename parameter labels save the model fit object as an array
 # This is done to aid chart comprehension
 ltMDE_m1_array <- renameArray(model = ltMDE_m1,
                              names = groupName,
                              start = 48,
                              finish = 89)
-dimnames(ltMDE_m1_array)[[3]][1] = "age_2534"
-dimnames(ltMDE_m1_array)[[3]][2] = "age_3549"
-dimnames(ltMDE_m1_array)[[3]][3] = "age_50plus"
-dimnames(ltMDE_m1_array)[[3]][4] = "Intercept"
-dimnames(ltMDE_m1_array)[[3]][5] = "Between-group std. dev."
+# 10/24/2024 Note: this code was updated to capture the correct intercept,
+# which is "b_Intercept".
+# In a prior version of this code, this was incorrectly identified as the 
+# parameter "Intercept" -- the incorrect "Intercept" parameter is mean-centered
+# and is much lower than the correct "b_Intercept" parameter, which is on the
+# original scale.
+# Therefore, this produced lower prevalence estimates for each intersectional
+# group in our original analysis and publication.
+dimnames(ltMDE_m1_array)[[3]][c(1:3, 5, 91)] <-
+  c("age_2534", "age_3549", "age_50plus", 
+    "Between-group std. dev.", "b_Intercept")
 
 # define parameters to display in plots
-parameters <- c(dimnames(ltMDE_m1_array)[[3]][1:5],
+parameters <- c(dimnames(ltMDE_m1_array)[[3]][c(1:3, 5, 91)],
                 groupName[1:42])
 
 # Autocorrelation plots
@@ -410,7 +443,9 @@ age_weights <- c(0.138, 0.159, 0.246, 0.456)
 # Generate age-standardized prevalence
 ltMDE_prevalence <-
   age_adj_prevalence(model = ltMDE_m1, 
-                     parameters =  c("Intercept", "b[1]", "b[2]", "b[3]"),
+                     # 10/24/2024 Note: We have updated this to the correct
+                     # intercept parameter ("b_Intercept")
+                     parameters =  c("b_Intercept", "b[1]", "b[2]", "b[3]"),
                      age_weights = age_weights)
 ```
 
@@ -420,12 +455,16 @@ Model coefficients
 # Get ORs and CIs
 ltMDE_m1_estimates <- ltMDE_m1_sum %>% 
   # keep rows with beta coefficients
-  filter(row_number() %in% c(1:4)) %>% 
+  # 10/24/2024 Note: We have updated this to the correct intercept parameter 
+  # ("b_Intercept")
+  filter(rownames(.) %in% c("b[1]", "b[2]", "b[3]", "b_Intercept")) %>% 
   mutate(
+    # Create a new column named "parameter" to store parameter names
     parameter = c("26-34",
                   "35-49",
                   "50+",
                   "Intecept"),
+    # Calculate odds ratios with 95% CIs
     OR = format(round(exp(mean),digits=2),nsmall=2),
     LB = format(round(exp(`2.5%`),digits=2),nsmall=2),
     UB = format(round(exp(`97.5%`),digits=2),nsmall=2),
@@ -447,25 +486,25 @@ mcmc_rhat_hist(rhat(ltMDE_m2)) +
   theme(axis.title = element_text(face="bold")) +
   labs(y="Frequency", x="r-hat values")
 
-# Rename parameter labels
+# save the model fit object as an array
 ltMDE_m2_array <- as.array(ltMDE_m2)
-dimnames(ltMDE_m2_array)[[3]][1] = "age_2534"
-dimnames(ltMDE_m2_array)[[3]][2] = "age_3549"
-dimnames(ltMDE_m2_array)[[3]][3] = "age_50plus"
-dimnames(ltMDE_m2_array)[[3]][4] = "Asian"
-dimnames(ltMDE_m2_array)[[3]][5] = "Black"
-dimnames(ltMDE_m2_array)[[3]][6] = "Hispanic/Latine"
-dimnames(ltMDE_m2_array)[[3]][7] = "NAAN"
-dimnames(ltMDE_m2_array)[[3]][8] = "NHPI"
-dimnames(ltMDE_m2_array)[[3]][9] = "Multiracial"
-dimnames(ltMDE_m2_array)[[3]][10] = "Woman"
-dimnames(ltMDE_m2_array)[[3]][11] = "Gay/Lesbian"
-dimnames(ltMDE_m2_array)[[3]][12] = "Bisexual"
-dimnames(ltMDE_m2_array)[[3]][13] = "Intercept"
-dimnames(ltMDE_m2_array)[[3]][14] = "Between-group std. dev."
-
+# Rename parameter labels
+# 10/24/2024 Note: this code was updated to capture the correct intercept,
+# which is "b_Intercept".
+# In a prior version of this code, this was incorrectly identified as the 
+# parameter "Intercept" -- the incorrect "Intercept" parameter is mean-centered
+# and is much lower than the correct "b_Intercept" parameter, which is on the
+# original scale.
+# Therefore, this produced lower prevalence estimates for each intersectional
+# group in our original analysis and publication.
+dimnames(ltMDE_m2_array)[[3]][c(1:12, 14, 100)] <-
+  c("age_2534", "age_3549", "age_50plus",
+    "Asian", "Black", "Hispanic/Latine", 
+    "NAAN", "NHPI", "Multiracial",
+    "Woman", "Gay/Lesbian", "Bisexual",
+    "Between-group std. dev.", "b_Intercept")
 # define parameters to display in plots
-parameters <- c(dimnames(ltMDE_m2_array)[[3]][1:14])
+parameters <- c(dimnames(ltMDE_m2_array)[[3]][c(1:12, 14, 100)])
 
 # Autocorrelation plots
 autocor_plots(array = ltMDE_m2_array, 
@@ -482,7 +521,13 @@ trace_plots(array = ltMDE_m2_array,
 # Get ORs and CIs
 ltMDE_m2_estimates = ltMDE_m2_sum %>% 
   # keep rows with beta coefficients
-  filter(row_number() %in% c(1:13)) %>% 
+  # 10/24/2024 Note: We have updated this to the correct intercept parameter 
+  # ("b_Intercept")
+  filter(rownames(.) %in% c("b[1]", "b[2]", "b[3]", 
+                            "b[4]", "b[5]", "b[6]",
+                            "b[7]", "b[8]", "b[9]",
+                            "b[10]", "b[11]", "b[12]",
+                            "b_Intercept")) %>% 
   mutate(
     parameter = c("26-34",
                   "35-49",
@@ -510,7 +555,9 @@ ltMDE_m2_estimates = ltMDE_m2_sum %>%
 ```{r}
 ltMDE_effects <- 
   calculate_effects(model = ltMDE_m2,
-                    parameters = c("Intercept", "b[1]", "b[2]", "b[3]",
+                    # 10/24/2024 Note: Updated to have the correct intercept
+                    # parameter ("b_Intercept").
+                    parameters = c("b_Intercept", "b[1]", "b[2]", "b[3]",
                                     "b[4]", "b[5]", "b[6]", "b[7]", "b[8]", 
                                     "b[9]", "b[10]", "b[11]", "b[12]"),
                     age_weights = age_weights)
@@ -649,10 +696,10 @@ mcmc_rhat_hist(rhat(pyMDE_m1)) +
 
 # Rename parameter labels 
 # This is done to aid chart comprehension
-pyMDE_m1_array = renameArray(model = pyMDE_m1,
-                             names = groupName,
-                             start = 6,
-                             finish = 47)
+pyMDE_m1_array <- renameArray(model = pyMDE_m1,
+                              names = groupName,
+                              start = 6,
+                              finish = 47)
 dimnames(pyMDE_m1_array)[[3]][1] = "Intercept"
 dimnames(pyMDE_m1_array)[[3]][2] = "age_2534"
 dimnames(pyMDE_m1_array)[[3]][3] = "age_3549"

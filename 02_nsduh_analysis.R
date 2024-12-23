@@ -13,7 +13,7 @@
 ##                    Conduct sensitivity analysis with unweighted Bayesian
 ##                    two-level logistic models fit with brms.
 ##
-## Author:            F. Hunter McGuire, MPH
+## Author:            F. Hunter McGuire, PhD, MPH
 ##
 ## Date created:      2023-08-17
 ## Last update:       2023-10-11

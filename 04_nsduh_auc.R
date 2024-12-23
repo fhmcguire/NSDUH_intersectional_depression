@@ -8,7 +8,7 @@
 #                    Conduct analysis separately for design-weighted and 
 #                    unweighted baseline models.
 #
-# Author: F. Hunter McGuire, MPH
+# Author: F. Hunter McGuire, PhD, MPH
 #
 # Date created: 2023-09-01
 # Last update:  2024-12-23

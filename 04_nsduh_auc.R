@@ -11,7 +11,7 @@
 # Author: F. Hunter McGuire, MPH
 #
 # Date created: 2023-09-01
-# Last update:  2024-05-06
+# Last update:  2024-12-23
 #
 # -----------------------------------------------------------------------------
 
@@ -76,16 +76,16 @@ age_weights <- c(0.138, 0.159, 0.246, 0.456)
 # Generate age-standardized prevalence
 ltMDE_pred <-
   age_adj_prevalence(model = ltMDE, 
-                     parameters =  c("Intercept", "b[1]", "b[2]", "b[3]"),
+                     parameters =  c("b_Intercept", "b[1]", "b[2]", "b[3]"),
                      age_weights = age_weights) %>% 
-  mutate(pred = Mean / 100) %>% 
+  mutate(pred = as.numeric(Mean) / 100) %>% 
   select(pred, strata = GroupID)
 
 pyMDE_pred <-
   age_adj_prevalence(model = pyMDE, 
-                     parameters =  c("Intercept", "b[1]", "b[2]", "b[3]"),
+                     parameters =  c("b_Intercept", "b[1]", "b[2]", "b[3]"),
                      age_weights = age_weights) %>% 
-  mutate(pred = Mean / 100) %>% 
+  mutate(pred = as.numeric(Mean) / 100) %>% 
   select(pred, strata = GroupID)
 
 # merge the predicted probabilities with the main data frames

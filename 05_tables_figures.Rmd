@@ -211,10 +211,10 @@ create_figure <- function(data,
       geom_vline(xintercept = 14.5,
                    linewidth = 0.5) +
       # add x and y axis labels
-      ylab(substitute(paste(bold('Age-standardized prevalence (95% CI)')))) +
+      ylab(substitute(paste(bold('Age-standardized prevalence (95% CrI)')))) +
       xlab(substitute(paste(bold(gender_label)))) +
-      scale_y_continuous(breaks=seq(0,50, by = 5),
-                         limits=c(0,50)) +
+      scale_y_continuous(breaks=seq(0,55, by = 5),
+                         limits=c(0,55)) +
       theme_clean(base_size=10) + 
       theme(panel.grid.major.y = element_line(colour = "gray", 
                                               linetype = "dotted"),
@@ -922,11 +922,11 @@ openxlsx::saveWorkbook(wb,
 # grab all parameter names that are formatted like one of:
 #   r_1_1[1] or lp or b[1] or Intercept
 m1_params <- 
-  grep("^r_1_1\\[\\d+\\]$|lp|b\\[\\d+\\]|\\bIntercept\\b|sd", 
+  grep("^r_1_1\\[\\d+\\]$|lp|b\\[\\d+\\]|b_Intercept|sd", 
        names(pyMDE_m1), 
        value = TRUE)
 m2_params <- 
-  grep("^r_1_1\\[\\d+\\]$|lp|b\\[\\d+\\]|\\bIntercept\\b|sd", 
+  grep("^r_1_1\\[\\d+\\]$|lp|b\\[\\d+\\]|b_Intercept|sd", 
        names(pyMDE_m2), 
        value = TRUE)
 
@@ -1780,4 +1780,3 @@ openxlsx::saveWorkbook(wb,
                        file="03_tables_figures/tableS6.xlsx", 
                        overwrite = TRUE)
 ```
-
